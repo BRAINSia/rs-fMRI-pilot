@@ -4,16 +4,15 @@
 
 #1.  Import files into Nifti format
 
-Args="-time:zt 32 132 2000 alt-z -epan -orient RAS"
-# numOfSlices = 32 (input [0054, 0081] <-- should be standard, but it's only for PET!)
+Args="-time:zt 32 132 2000 alt+z -epan -orient RAS"
+# numOfSlices = 32 (input)
 # numOfVols = 132  (from DICOM)
 # tr(ms) = 2000    (from DICOM: Repetition Time [0018, 0080])
-to3d $Args -prefix /paulsen/Experiments/rsFMRI/${subjid}/${sessionid}/Rest.nii \
-           /paulsen/MRx/FMRI_HD_${siteid}/${subjid}/${sessionid}ANONRAW/FMRI_RestingStateConnectivity/*/*.IMA
+to3d $Args -prefix /paulsen/Experiments/rsFMRI/${subjid}/${sessionid}/Rest.nii /paulsen/MRx/FMRI_HD_${siteid}/${subjid}/${sessionid}ANONRAW/FMRI_RestingStateConnectivity/*/*.IMA
 
 #Dave: at this point, we need to either add full paths below or cd into the subjects correct directory.
 
-3drefit -deoblique Rest.nii  ### WHERE DOES THE OUTPUT FROM 3DRefit go???
+3drefit -deoblique Rest.nii
 
 #Note. Some of the 'args' aboe will change from study to study. Would be nice to have a way to extract the relevant information from the dicom headers.
 
@@ -33,32 +32,21 @@ to3d $Args -prefix /paulsen/Experiments/rsFMRI/${subjid}/${sessionid}/Rest.nii \
 #4.  Scaling all voxels.  We are actually just doing a mean shift (i.e., not taking percent signal change for rsfMRI compared to task fMRI).
 
 3dTstat -prefix Rest_mn.nii -mean Rest_vr.nii
-3dcalc -prefix Rest_ms.nii -a Rest_vr.nii -b Rest_mn.nii -expr 'a - b'
-# 3dcalc -prefix Rest_ms.nii -a Rest_vr.nii -expr 'a - Rest_mn.nii'
+3dcalc -prefix Rest_ms.nii -a Rest_vr.nii -b Rest_mn.nii -expr '(a - b) + 1000'
 
 #Note. Rest_mn.nii will be used later as a registration base (i.e., we will warp this to T1).
 
 #5.  Bandpass filter (.011 to .1 Hz) using 3dFourier.
 
-3dFourier -prefix Rest_bp.nii -highpass .011 -lowpass .1 -retrend Rest_zpad.nii
+3dFourier -prefix Rest_bp.nii -highpass .011 -lowpass .1 -retrend Rest_ms.nii
 
 #6.  Spatial smoothing with 6mm smoothing kernel.
 
 3dmerge -prefix Rest_smooth.nii -1blur_fwhm 6 -doall -1noneg -1clip 100 Rest_bp.nii
 
-#7.  Pad with zeros in IS dimension to make sure nothing gets cut off during later coregistration and warping.
+#7.  Coregister to T1 which is in the same space as the FreeSurfer structural images (we will be extracting signal from FreeSurfer ROIs later).
 
-3dZeropad -prefix Rest_zpad.nii -IS 44 Rest_ms.nii  ### WAS THIS SUPPOSED TO CONNECT TO 3dFourier!?!
-
-#Note. Not clear if 3dZeropad has to happen at this point but probably better to do it after spatial smoothing.
-
-#8.  Coregister to T1 which is in the same space as the FreeSurfer structural images (we will be extracting signal from FreeSurfer ROIs later).
-
-Dave: can you please try to script this out?  I have provided conceptual directions.
-
-	A.  Convert T1.mgz into nifti format.  (This step can be done earlier.)  There is a FreeSurfer command called mri_convert that will do this.  Joy told me
-	about it so if you have questions, you can ask her.
-	I believe the actual command is as simple as: mri_convert oldimage newimage.
+     a.  convert the FS label image to nifti format
 
 	FreeSurfer image locations
 
@@ -68,7 +56,53 @@ Dave: can you please try to script this out?  I have provided conceptual directi
 	spreadsheet) information into our rsfMRI directory (list_JTM_edit_20120815.xlsx).  I
 	will need to go over all the details of this spreadsheet with you.
 
-	B.
+	you can use the program mri_convert (which i think is a freesurfer utility to do this).
+
+	example:
+	mri_convert --in_type .mgz --out_type nii.gz subjectsfile.mgz subjectsfile.nii.gz
+
+     b. use an afni program called 3dAllineate to do a rigid registration between the functional image and the T1.  This will happen in two steps.  first, we
+     fit the mean fMRI image to the T1.  Then we apply that transform to all fMRI volumes.
+
+# Rest_smooth.nii
+     i. 3dAllineate \
+         -base /paulsen/Experiments/20120722_JOY_DWI/FMRI_HD_120/$subjectid/$sessionid/10_AUTO.NN3Tv20110419/$sessionid_AVG_T1.nii.gz \
+         -source Rest_mn.nii \
+         -prefix rRest_mn.nii \
+         -warp shr \
+         -cost mi \
+         -cmass \
+         -interp quintic \
+         -final quintic \
+         -1Dmatrix_save Rest_mn-T1
+
+	  ii. 3dAllineate \
+          -master /paulsen/Experiments/20120722_JOY_DWI/FMRI_HD_120/$subjectid/$sessionid/10_AUTO.NN3Tv20110419/$sessionid_AVG_T1.nii.gz  -mast_dxyz 2.0 \
+          -1Dmatrix_apply Rest_mn-T1.aff12.1D \
+          -input Rest_bp.nii \
+          -final quintic \
+          -prefix rRest_bp.nii
+
+###############End of first phase of preprocessing#################
+
+
+##############Begin Phase 2 of preprocessing#############################
+#Phase 2 involves regressing out signal of non-interest from white matter and CSF.
+
+
+#1.  Generate a CSF mask using Autoworkup output.  I have been running it on the command line within BRAINS2 but it should be scripted/automated.
+
+b2 load Image /paulsen/Experiments/20120722_JOY_DWI/FMRI_HD_120/$subjectid/$sessionid/10_AUTO.NN3Tv20110419/$sessionid_ACPC_Class.nii.gz
+b2 threshold image i1 2 upperThreshold=  30
+b2 load Talairach-Parameters /paulsen/Experiments/20120722_JOY_DWI/FMRI_HD_120/$subjectid/$sessionid/10_AUTO.NN3Tv20110419/???Talairach.bnd
+b2 load Talairach-Box /opt/brains2/bin/talairach/vent2_box
+b2 convert Talairach-Box to Mask talbox1 talpar1
+b2 And masks m1 m2
+b2 save mask /IPLlinux/oleary/functional/BD_COGA/142005/61793711/10_AUTO.v020/61793711_CSF.mask brains2 m3
+b2 sum masks m3
+b2 save image /IPLlinux/oleary/functional/BD_COGA/142005/61793711/10_AUTO.v020/61793711_CSF.nii.gz nifti i2 data-type= unsigned-8bit plane= coronal
+
+
 
 
 

@@ -73,13 +73,13 @@ def pipeline(**kwds):
 
     despike = pipe.Node(interface=Despike(), name='afni3Ddespike')
     despike.inputs.outputtype = outputType
-    despike.inputs.args = '-prefix Rest_ds -ignore 4' # -ignore 4
+    despike.inputs.args = '-ignore 4'
 
     volreg = pipe.Node(interface=Volreg(), name='afni3DvolReg')
     volreg.inputs.outputtype = outputType
     volreg.inputs.timeshift = False # 0
     volreg.inputs.zpad = 3
-    # volreg.inputs.onedfile = 'Rest_mt.1D' # TODO: Verify with Jatin if should connect to a dataGrabber?
+    # volreg.outputs.onedfile = 'Rest_mt.1D' # TODO: Verify with Jatin if should connect to a dataGrabber?
     volreg.inputs.args = '-cubic -maxite 50 -x_thresh 0.001 -rot_thresh 0.001 -delta 0.1 -final Fourier \
                           -twopass -twodup -coarse 2 2 -coarserot -base 9 '
 
@@ -89,7 +89,7 @@ def pipeline(**kwds):
 
     calc = pipe.Node(interface=Calc(), name='afni3Dcalc')
     calc.inputs.outputtype = outputType
-    calc.inputs.expr = 'a-b'
+    calc.inputs.expr = '(a - b) + 1000'
 
     fourier = pipe.Node(interface=Fourier(), name='afni3Dfourier')
     fourier.inputs.outputtype = outputType
@@ -104,20 +104,18 @@ def pipeline(**kwds):
     merge.inputs.doall = True
     merge.inputs.args = '-1noneg -1clip 100'
 
-    ### TODO: check/implement this node ###
-    zeroPad = pipe.Node(interface=Zeropad(), name='afni3DzeroPad')
-    zeroPad.inputs.direction_list = ['IS']
-    zeroPad.inputs.pad_count_list = [44]
-    zeroPad.inputs.mm = False
-
     convert = pipe.Node(interface=MRIConvert(), name='freesurferMRIconvert')
     convert.inputs.in_orientation = 'RAS'
     convert.inputs.in_type = 'mgz'
     convert.inputs.out_orientation = 'RAS'
     convert.inputs.out_type = fOutputType
 
-    ### TODO ###
-    register = pipe.Node(interface=????(), name='??????')
+    register1 = pipe.Node(interface=Allineate(), name='afni3Dallineate')
+    register1.inputs.outputtype = outputType
+    # TODO: how to pass output from previous node to args input string???
+    ### Implement flags in Allineate() code
+    register1.inputs.args = '-warp shr -cost mi -cmass -interp quintic -final quintic '
+
 
     # Connect pipeline
     #1.
@@ -127,22 +125,18 @@ def pipeline(**kwds):
     preproc.connect(to_3D, 'out_file', despike, 'in_file') # TODO: connect refit to despike???
     #3.
     preproc.connect(despike, 'out_file', volreg, 'in_file')
-    preproc.connect('?????', 'out_file', volreg, 'onedfile') # TODO: Verify with Jatin if should connect to a dataGrabber?
     #4.
     preproc.connect(volreg, 'out_file', tstat, 'in_file')
     preproc.connect(volreg, 'out_file', calc, 'in_file_a')
     preproc.connect(tstat, 'out_file', calc, 'in_file_b')
     #5.
-    preproc.connect(volreg, 'out_file', fourier, 'in_file') # TODO: Verify with Jatin - where does 'Rest_zpad' come from?
+    preproc.connect(calc, 'out_file', fourier, 'in_file')
     #6.
-    preproc.connect(fourier, 'out_file', merge, 'in_file')
+    preproc.connect(fourier, '_file', merge, 'in_file')
     #7.
-    preproc.connect(calc, 'out_file', zeroPad, 'in_file')
-    preproc.connect(zeroPad, 'out_file', ???, '???') # TODO: Verify with Jatin - 'Rest_zpad' created here?
-    #8.
     preproc.connect(t1grabber, 'out_file', convert, 'in_file')
     ### TODO: Decide on registration method and direction ###
-    preproc.connect(convert, 'out_file', register, 'fixed') # Do we want to use antsRegistration or BRAINSFit?
+    preproc.connect(convert, 'out_file', register1, 'infile') # Do we want to use antsRegistration or BRAINSFit?
     preproc.connect(zeroPad, 'out_file', register, 'moving') # Should fixed be the T1 or the fMRI data?  Does it matter?
 
 if __name__ == '__main__':
