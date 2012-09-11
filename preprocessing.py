@@ -110,12 +110,15 @@ def pipeline(**kwds):
     convert.inputs.out_orientation = 'RAS'
     convert.inputs.out_type = fOutputType
 
-    register1 = pipe.Node(interface=Allineate(), name='afni3Dallineate')
+    register1 = pipe.Node(interface=Allineate(), name='afni3Dallineate1')
     register1.inputs.outputtype = outputType
     # TODO: how to pass output from previous node to args input string???
     ### Implement flags in Allineate() code
-    register1.inputs.args = '-warp shr -cost mi -cmass -interp quintic -final quintic '
+    register1.inputs.args = '-warp shr -cost mi -cmass -interp quintic -final quintic -1Dmatrix_save ${1D_out}'
 
+    register2 = pipe.Node(interface=Allineate(), name='afni3Dallineate2')
+    register2.inputs.outputtype = outputType
+    register2.inputs.args = '-mast_dxyz 2.0 -1Dmatrix_apply ${1D_out} -final quintic'
 
     # Connect pipeline
     #1.
@@ -135,9 +138,14 @@ def pipeline(**kwds):
     preproc.connect(fourier, '_file', merge, 'in_file')
     #7.
     preproc.connect(t1grabber, 'out_file', convert, 'in_file')
-    ### TODO: Decide on registration method and direction ###
-    preproc.connect(convert, 'out_file', register1, 'infile') # Do we want to use antsRegistration or BRAINSFit?
-    preproc.connect(zeroPad, 'out_file', register, 'moving') # Should fixed be the T1 or the fMRI data?  Does it matter?
+    #8.
+    preproc.connect(convert, 'out_file', register1, 'base')
+    preproc.connect(tstat, 'out_file', register1, 'source')
+    # preproc.connect(volreg, 'onedfile', register1, 'onedmatrix_save')
+    # preproc.connect(convert, 'out_file', register2, 'master')
+    # preproc.connect(register1, 'onedmatrix_save', register2, 'onedmatrix_apply')
+    # preproc.connect()
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Preprocessing script for resting state fMRI')
