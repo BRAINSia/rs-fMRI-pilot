@@ -27,11 +27,11 @@ def readNrrdHeader(fileName):
     # TODO: grep header for numberOfSlices and numberOfVolumes
     return numberOfSlices, numberOfVolumes
 
-def generateTissueMask(inputLabelMap, low=1, high=255):
+def generateTissueMask(inputLabelMap, low=0.0, high=1.0):
     import SimpleITK as sitk
 
     #GeodesicActiveContourLevelSet
-    def getLargestConnectedRegion(input_file):
+    def getLargestConnectedRegion(input_file, low=0, high=100):
         """
         Labels connected regions in order from largest (#1) to smallest,
         then thresholds to only return the largest region
@@ -43,11 +43,12 @@ def generateTissueMask(inputLabelMap, low=1, high=255):
 
     ## Compute brain mask
     binaryMask = sitk.BinaryThreshold(input_file, low, high)
-    erodedMask = binaryMask
-    ## Its faster to erodedMask 10 times by 1 than to use a 10x10 element
-    for i in range(1, 3):
-        erodedMask = sitk.ErodeObjectMorphology(erodedMask, 1)
-    csfMask = sitk.BinaryThreshold(input_file * erodedMask, 4, 4, 1, 0)
+    kernel = sitk.ErodeObjectMorphology.KernelType('Ball')
+    radiusMM = 2
+    # Does this take the ceil() of the erosion?
+    csfMask = sitk.ErodeObjectMorphology(binaryMask, radiusMM, kernel, 1, 0)
+    ## erodedMask = sitk.ErodeObjectMorphology(binaryMask, 2)
+    ## csfMask = sitk.BinaryThreshold(input_file * erodedMask, ### low, ### high, 1, 0)
     csfMaskOnly = getLargestConnectedRegion(csfMask)
     csfEroded = sitk.ErodeObjectMorphology(csfMaskOnly, 1)
     # Binary dilation
@@ -68,17 +69,45 @@ def pipeline(**kwds):
     sessions = pipe.Node(interface=IdentityInterface(fields=['session_id']), name='sessionIDs')
     sessions.iterables = ('session_id', sessionID)
 
-    fMRIgrabber = pipe.Node(interface=DataGrabber(infields=['session_id'], outfields=['outfolder']),
-                            name='fMRIdata')
-    fMRIgrabber.inputs.base_directory = '/paulsen/MRx/FMRI_HD_120'
-    fMRIgrabber.inputs.template = '*/%s/ANONRAW/FMRI_RestingStateConnectivity/*'
-    fMRIgrabber.inputs.template_args['outfolder'] = [['session_id', 'session_id']]
+    grabber = pipe.Node(interface=DataGrabber(infields=['session_id'],
+                                              outfields=['fmri_folder', 't1_file',
+                                                         'csf_file', 'wm_file']),
+        name='dataGrabber')
+    grabber.inputs.base_directory = '/paulsen'
+    grabber.inputs.template = '*'
+    ### TODO: rename 'outfolder' to 'fmri_folder'
+    ### TODO: rename 'out_file' from t1grabber to 't1_file'
+    grabber.inputs.field_template = dict(fmri_folder='MRx/FMRI_HD_120/*/%s/%s/%s/*'
+                                         t1_file='Experiments/20120722_JOY_DWI/FMRI_HD_120/*/%s/%s/%s_*_%s/T1.mgz'
+                                         csf_file='Experiments/20120801.SubjectOrganized_Results/PHD_120/*/%s/%s/POSTERIOR_CSF_TOTAL.nii.gz',
+                                         wm_file= 'Experiments/20120801.SubjectOrganized_Results/PHD_120/*/%s/%s/POSTERIOR_WM_TOTAL.nii.gz')
+    grabber.inputs.template_args = dict(fmri_folder=[['session_id', 'ANONRAW', 'FMRI_RestingStateConnectivity']],
+                                         t1_file=[['session_id', '10_AUTO.NN3Tv20110419','JOY_v51_2011', 'session_id']],
+                                         csf_file=[['session_id','ACCUMULATED_POSTERIORS']],
+                                         wm_file=[['session_id','ACCUMULATED_POSTERIORS']])
 
-    t1grabber = pipe.Node(interface=DataGrabber(infields=['session_id'], outfields=['out_file']),
-                          name='T1data')
-    t1grabber.inputs.base_directory = '/paulsen/Experiments/20120722_JOY_DWI/FMRI_HD_120'
-    t1grabber.inputs.template = '*/%s/10_AUTO.NN3Tv20110419/JOY_v51_2011_*_%s/T1.mgz'
-    t1grabber.inputs.template_args['out_file'] = [['session_id', 'session_id']]
+    # fMRIgrabber = pipe.Node(interface=DataGrabber(infields=['session_id'],
+    #                                               outfields=['outfolder']),
+    #                         name='fMRIdata')
+    # fMRIgrabber.inputs.base_directory = '/paulsen/MRx/FMRI_HD_120'
+    # fMRIgrabber.inputs.template = '*/%s/ANONRAW/FMRI_RestingStateConnectivity/*'
+    # fMRIgrabber.inputs.sorted = True
+    # fMRIgrabber.inputs.template_args['outfolder'] = [['session_id', 'session_id']]
+
+    # t1grabber = pipe.Node(interface=DataGrabber(infields=['session_id'],
+    #                                             outfields=['out_file']),
+    #                       name='T1data')
+    # t1grabber.inputs.base_directory = '/paulsen/Experiments/20120722_JOY_DWI/FMRI_HD_120'
+    # t1grabber.inputs.template = '*/%s/10_AUTO.NN3Tv20110419/JOY_v51_2011_*_%s/T1.mgz'
+    # t1grabber.inputs.template_args['out_file'] = [['session_id', 'session_id']]
+
+    # posteriorGrabber = pipe.Node(interface=DataGrabber(infields=['session_id', 'posteriors'],
+    #                                                    outfields=['csf_file', 'wm_file']),
+    #                              name='posteriorData')
+    # t1grabber.inputs.base_directory = '/paulsen/Experiments/20120801.SubjectOrganized_Results/PHD_120'
+    # t1grabber.inputs.template = '*/%s/ACCUMULATED_POSTERIORS/%s'
+    # t1grabber.inputs.template_args['csf_file'] = [['session_id', 'POSTERIOR_CSF_TOTAL.nii.gz']]
+    # t1grabber.inputs.template_args['wm_file'] = [['session_id', 'POSTERIOR_WM_TOTAL.nii.gz']]
 
     if len(sessionID) > 1:
         preprocess.connect(sessions, 'session_id', fMRIgrabber, 'session_id')
@@ -155,15 +184,13 @@ def pipeline(**kwds):
                                            input_names=['input_file','low', 'high'],
                                            output_names=['output_file']),
                         name='csfMask')
-    csfmask.inputs.low = 1
-    csfmask.inputs.high = 30
+    csfmask.inputs.low = 0.99
 
     wmmask = pipe.Node(interface=Function(function=generateTissueMask,
                                            input_names=['input_file','low', 'high'],
                                            output_names=['output_file']),
                         name='wmMask')
-    csfmask.inputs.low = #???
-    csfmask.inputs.high = #???
+    wmmask.inputs.low = 0.99
 
     # Connect pipeline
     #1.
@@ -190,7 +217,8 @@ def pipeline(**kwds):
     preproc.connect(register1, 'onedmatrix', register2, 'onedmatrix')
     preproc.connect(fourier, 'out_file', register2, 'in_file')
     #9.
-    #???
+    preproc.connect(posteriorGrabber, 'csf_file', csfmask, 'input_file')
+    preproc.connect(posteriorGrabber, 'wm_file', wmmask, 'input_file')
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Preprocessing script for resting state fMRI')
