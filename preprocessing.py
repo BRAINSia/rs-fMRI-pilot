@@ -12,7 +12,7 @@ from nipype.interfaces.utility import Function, IdentityInterface
 from nipype.interfaces.afni.preprocess import *
 from nipype.interfaces.freesurfer.preprocess import *
 
-from .convert import *
+from convert import *
 
 def readNrrdHeader(fileName):
     """
@@ -41,6 +41,8 @@ def dicomRead(infolder):
     import os
     import dicom
     for ii in os.listdir(os.path.abspath(infolder)):
+        # header = dicom.read_file(filePaths[0])
+        # repetitionTime = header.RepetitionTime
         meta = dicom.read_file(ii)
         if "RepetitionTime" in meta:
             return meta.data_element('RepetitionTime')
@@ -74,14 +76,11 @@ def generateTissueMask(inputLabelMap, low=0.0, high=1.0):
     maskOnly = getLargestConnectedRegion(erodedMask)
     return maskOnly
 
-def pipeline(**kwds):
-    preproc = pipe.Workflow()
-
-    # filePaths = glob.glob('/paulsen/MRx/FMRI_HD_*/*/%s/ANONRAW/FMRI_RestingStateConnectivity/*/*.IMA' % sessionID)
-    # if len(filePath) == 0:
-    #     filePaths = glob.glob('/paulsen/MRx/FMRI_HD_*/*/%s/ANONRAW/FMRI_RestingStateConnectivity/*/*.dcm' % sessionID)
-    # header = dicom.read_file(filePaths[0])
-    # repetitionTime = header.RepetitionTime
+def pipeline(args):
+    sessionID = args.sessionID
+    outputType = args.outputType
+    fOutputType = args.fOutputType
+    preproc = pipe.Workflow(name='rs_fmri_preprocessing')
 
     sessions = pipe.Node(interface=IdentityInterface(fields=['session_id']), name='sessionIDs')
     sessions.iterables = ('session_id', sessionID)
@@ -92,8 +91,8 @@ def pipeline(**kwds):
         name='dataGrabber')
     grabber.inputs.base_directory = '/paulsen'
     grabber.inputs.template = '*'
-    grabber.inputs.field_template = dict(fmri_dicom_dir='MRx/FMRI_HD_120/*/%s/%s/%s/*'
-                                         t1_file='Experiments/20120722_JOY_DWI/FMRI_HD_120/*/%s/%s/%s_*_%s/T1.mgz'
+    grabber.inputs.field_template = dict(fmri_dicom_dir='MRx/FMRI_HD_120/*/%s/%s/%s/*',
+                                         t1_file='Experiments/20120722_JOY_DWI/FMRI_HD_120/*/%s/%s/%s_*_%s/T1.mgz',
                                          csf_file='Experiments/20120801.SubjectOrganized_Results/PHD_120/*/%s/%s/%s.nii.gz',
                                          wm_file= 'Experiments/20120801.SubjectOrganized_Results/PHD_120/*/%s/%s/%s.nii.gz')
     grabber.inputs.template_args = dict(fmri_dicom_dir=[['session_id', 'ANONRAW', 'FMRI_RestingStateConnectivity']],
@@ -124,27 +123,20 @@ def pipeline(**kwds):
     # t1grabber.inputs.template_args['csf_file'] = [['session_id', 'POSTERIOR_CSF_TOTAL.nii.gz']]
     # t1grabber.inputs.template_args['wm_file'] = [['session_id', 'POSTERIOR_WM_TOTAL.nii.gz']]
 
-    if len(sessionID) > 1:
-        preprocess.connect(sessions, 'session_id', grabber, 'session_id')
-        preprocess.connect(sessions, 'session_id', grabber, 'session_id')
-    else:
-        grabber.inputs.session_id = sessionID[0]
-        grabber.inputs.session_id = sessionID[0]
-
     dicomNrrd = pipe.Node(interface=DWIconvert(), name='dicomToNrrd')
     dicomNrrd.inputs.conversionMode = 'DicomToNrrd'
 
-    grep = pipe.Node(interface=Function(function=readNrrdHeader(),
+    grep = pipe.Node(interface=Function(function=readNrrdHeader,
                                         input_names=['fileName'],
-                                        output_names=['slices, volumes']),
+                                        output_names=['slices', 'volumes']),
                                         name='nrrdGrep')
 
-    strCreate = pipe.Node(interface=Function(function=strCreate(),
+    to_3D_str = pipe.Node(interface=Function(function=strCreate,
                                              input_names=['slices', 'volumes', 'repTime'],
                                              output_names=['out_string']),
                                              name='strCreate')
 
-    dicom = pipe.Node(interface=Function(function=dicomRead(),
+    dicom = pipe.Node(interface=Function(function=dicomRead,
                                          input_names=['infolder'],
                                          output_names=['repTime']),
                                          name='dicomRead')
@@ -160,7 +152,7 @@ def pipeline(**kwds):
 
     despike = pipe.Node(interface=Despike(), name='afni3Ddespike')
     despike.inputs.outputtype = outputType
-    despike.inputs.args = '-ignore 4'
+    despike.inputs.args = '-ignore 4' # TODO
 
     volreg = pipe.Node(interface=Volreg(), name='afni3DvolReg')
     volreg.inputs.outputtype = outputType
@@ -183,7 +175,7 @@ def pipeline(**kwds):
 
     tstat = pipe.Node(interface=TStat(), name='afni3DtStat')
     tstat.inputs.outputtype = outputType
-    tstat.inputs.args = '-mean'
+    tstat.inputs.args = '-mean' # TODO
 
     calc = pipe.Node(interface=Calc(), name='afni3Dcalc')
     calc.inputs.outputtype = outputType
@@ -193,7 +185,7 @@ def pipeline(**kwds):
     fourier.inputs.outputtype = outputType
     fourier.inputs.highpass = 0.011
     fourier.inputs.lowpass = 0.1
-    fourier.inputs.args = '-retrend'
+    fourier.inputs.args = '-retrend' # TODO
     fourier.inputs.outputtype = outputType
 
     merge = pipe.Node(interface=Merge(), name='afni3Dmerge')
@@ -201,6 +193,9 @@ def pipeline(**kwds):
     merge.inputs.blurfwhm = 6
     merge.inputs.doall = True
     merge.inputs.args = '-1noneg -1clip 100'
+    ### TODO: implement
+    # merge.inputs.onenoneg = True
+    # merge.inputs.oneclip = 100
 
     converter = pipe.Node(interface=MRIConvert(), name='freesurferMRIconvert')
     converter.inputs.out_type = fOutputType
@@ -233,15 +228,19 @@ def pipeline(**kwds):
     wmmask.inputs.low = 0.99
 
     # Connect pipeline
+    if len(sessionID) > 1:
+        preproc.connect(sessions, 'session_id', grabber, 'session_id')
+    else:
+        grabber.inputs.session_id = sessionID[0]
     #1.
     preproc.connect(grabber, 'fmri_dicom_dir', to_3D, 'infolder')
     preproc.connect(grabber, 'fmri_dicom_dir', dicom, 'infolder')
     preproc.connect(grabber, 'fmri_dicom_dir', dicomNrrd, 'inputDicomDirectory')
     preproc.connect(dicomNrrd, 'outputVolume', grep, 'fileName')
-    preproc.connect(grep, 'slices', strCreate, 'slices')
-    preproc.connect(grep, 'volumes', strCreate, 'volumes')
-    preproc.connect(dicom, 'repTime', strCreate, 'repTime')
-    preproc.connect(strCreate, 'out_string', to_3D, 'funcparams')
+    preproc.connect(grep, 'slices', to_3D_str, 'slices')
+    preproc.connect(grep, 'volumes', to_3D_str, 'volumes')
+    preproc.connect(dicom, 'repTime', to_3D_str, 'repTime')
+    preproc.connect(to_3D_str, 'out_string', to_3D, 'funcparams')
     preproc.connect(to_3D, 'out_file', refit, 'in_file')
     #2.
     preproc.connect(to_3D, 'out_file', despike, 'in_file')
@@ -254,7 +253,7 @@ def pipeline(**kwds):
     #5.
     preproc.connect(calc, 'out_file', fourier, 'in_file')
     #6.
-    preproc.connect(fourier, 'out_file', merge, 'in_file')
+    preproc.connect(fourier, 'out_file', merge, 'in_files')
     #7.
     preproc.connect(grabber, 't1_file', converter, 'in_file')
     #8.
@@ -267,18 +266,19 @@ def pipeline(**kwds):
     preproc.connect(grabber, 'csf_file', csfmask, 'input_file')
     preproc.connect(grabber, 'wm_file', wmmask, 'input_file')
 
+    preproc.run()
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Preprocessing script for resting state fMRI')
     parser.add_argument('-t', '--filetype', action='store', dest='outputType', type=str, required=False,
-                        default='NIFTI', help='File type for outputs.  Values: "NIFTI_GZ", "AFNI", "NIFTI" (default)'
+                        default='NIFTI', help='File type for outputs.  Values: "NIFTI_GZ", "AFNI", "NIFTI" (default)')
     parser.add_argument('-n','--name', action='store', dest='name', type=str, required=True,
                         help='Name (required)')
-    parser.add_argument('-s', '--session', action='store', dest='sessionID', type=list, required=True,
-                        help='list of session IDs (required)')
+    parser.add_argument('-s', '--session', action='store', dest='sessionID', type=int, required=True,
+                        nargs='*', help='list of session IDs (required)')
     args = parser.parse_args()
     freesurferOutputTypes = {"NIFTI_GZ" : "niigz",
                              "AFNI" : "afni",
                              "NIFTI" : "nii"}
-    args[fOutputType] = freesurferOutputTypes[args['outputType']]
-
+    args.fOutputType = freesurferOutputTypes[args.outputType]
     sys.exit(pipeline(args))
