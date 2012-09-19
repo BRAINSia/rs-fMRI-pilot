@@ -27,6 +27,35 @@ def readNrrdHeader(fileName):
     # TODO: grep header for numberOfSlices and numberOfVolumes
     return numberOfSlices, numberOfVolumes
 
+def generateCSFMask(inputLabelMap, low=1, high=255):
+    import SimpleITK as sitk
+
+    #GeodesicActiveContourLevelSet
+    def getLargestConnectedRegion(inputLabelMap):
+        """
+        Labels connected regions in order from largest (#1) to smallest,
+        then thresholds to only return the largest region
+        """
+        connected = sitk.ConnectedComponent(mask)
+        relabeled = sitk.RelabelComponent(connected)
+        largestLabel = sitk.BinaryThreshold(relabeled, 1, 1, 1, 0)
+        return largestLabel
+
+    ## Compute brain mask
+    binaryMask = sitk.BinaryThreshold(inputLabelMap, low, high)
+    erodedMask = binaryMask
+    ## Its faster to erodedMask 10 times by 1 than to use a 10x10 element
+    for i in range(1, 3):
+        erodedMask = sitk.ErodeObjectMorphology(erodedMask, 1)
+    csfMask = sitk.BinaryThreshold(inputLabelMap * erodedMask, 4, 4, 1, 0)
+    csfMaskOnly = getLargestConnectedRegion(csfMask)
+    csfEroded = sitk.ErodeObjectMorphology(csfMaskOnly, 1)
+    # Binary dilation
+    csfDilated = sitk.DilateObjectMorphology(csfEroded, 5)
+    csfMaskFinal = getLargestConnectedRegion(csfDilated)
+    return csfMaskFinal * csfMask
+
+
 def pipeline(**kwds):
     preproc = pipe.Workflow()
 
@@ -112,13 +141,15 @@ def pipeline(**kwds):
 
     register1 = pipe.Node(interface=Allineate(), name='afni3Dallineate1')
     register1.inputs.outputtype = outputType
-    # TODO: how to pass output from previous node to args input string???
-    ### Implement flags in Allineate() code
-    register1.inputs.args = '-warp shr -cost mi -cmass -interp quintic -final quintic -1Dmatrix_save ${1D_out}'
+    register1.inputs.warp = 'shift_rotate'
+    register1.inputs.cost = 'mutualinfo'
+    register1.inputs.cmass = True
+    register1.inputs.interp = 'triquintic'
+    register1.inputs.final = 'triquintic'
 
     register2 = pipe.Node(interface=Allineate(), name='afni3Dallineate2')
     register2.inputs.outputtype = outputType
-    register2.inputs.args = '-mast_dxyz 2.0 -1Dmatrix_apply ${1D_out} -final quintic'
+    register2.inputs.final = 'triquintic'
 
     # Connect pipeline
     #1.
@@ -139,13 +170,13 @@ def pipeline(**kwds):
     #7.
     preproc.connect(t1grabber, 'out_file', convert, 'in_file')
     #8.
-    preproc.connect(convert, 'out_file', register1, 'base')
-    preproc.connect(tstat, 'out_file', register1, 'source')
-    # preproc.connect(volreg, 'onedfile', register1, 'onedmatrix_save')
-    # preproc.connect(convert, 'out_file', register2, 'master')
-    # preproc.connect(register1, 'onedmatrix_save', register2, 'onedmatrix_apply')
-    # preproc.connect()
-
+    preproc.connect(convert, 'out_file', register1, 'base_file')
+    preproc.connect(calc, 'out_file', register1, 'in_file')
+    preproc.connect(convert, 'out_file', register1, 'master_file')
+    preproc.connect(register1, 'onedmatrix', register2, 'onedmatrix')
+    preproc.connect(fourier, 'out_file', register2, 'in_file')
+    #9.
+    #???
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Preprocessing script for resting state fMRI')
