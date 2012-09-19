@@ -194,7 +194,7 @@ def pipeline(**kwds):
 
     # Connect pipeline
     #1.
-    preproc.connect(grabber, 'fmir_folder', to_3D, 'infolder')
+    preproc.connect(grabber, 'fmri_folder', to_3D, 'infolder')
     preproc.connect(to_3D, 'out_file', refit, 'in_file')
     #2.
     preproc.connect(to_3D, 'out_file', despike, 'in_file') # TODO: connect refit to despike???
