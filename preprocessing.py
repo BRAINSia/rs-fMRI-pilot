@@ -13,25 +13,31 @@ from nipype.interfaces.afni.preprocess import *
 from nipype.interfaces.freesurfer.preprocess import *
 import dicom
 
-def dicomToNrrd(fileName):
-    import shlex
-    import subprocess
-    _cmd = '/ipldev/sharedopt/20120722/Darwin_i386/DicomToNrrdConverter/DWIConvert-build/DWIConvert'
-    args = '--conversionMode DicomToNrrd --outputDirectory %s --inputDicomDirectory %s' % () # TODO: pass relevant args
-    command = shlex.split(" ".join(_cmd, args))
-    subprocess.call(command, shell=True)
-    return outputFiles # TODO: get the path to the outfile
+from .convert import *
 
 def readNrrdHeader(fileName):
-    headerName = dicomToNrrd(fileName)
-    # TODO: grep header for numberOfSlices and numberOfVolumes
-    return numberOfSlices, numberOfVolumes
+    import re
+    fID = open(fileName, 'r')
+    try:
+        for line in fID.readlines():
+            search = re.search('(?<=sizes:\s)(?:[0-9]*)\s(?:[0-9])*\s(?P<slices>[0-9]*)\s(?P<volumes>[0-9]*)')
+            if search is not None:
+                slices = search.groupdict()['slices']
+                volumes = search.groupdict()['volumes']
+                return slices, volumes
+    finally:
+        fID.close()
+    raise IOError('Nrrd file %s has regex match for slice and volume numbers!' % fileName)
 
 def generateTissueMask(inputLabelMap, low=0.0, high=1.0):
+    """
+    Using posterior tissue probability file, threshold by
+    a low and/or high value, erode by 2mm, and take the ceil()
+    Return the result as a binary mask file
+    """
     import SimpleITK as sitk
 
-    #GeodesicActiveContourLevelSet
-    def getLargestConnectedRegion(input_file, low=0, high=100):
+    def getLargestConnectedRegion(mask):
         """
         Labels connected regions in order from largest (#1) to smallest,
         then thresholds to only return the largest region
@@ -46,16 +52,9 @@ def generateTissueMask(inputLabelMap, low=0.0, high=1.0):
     kernel = sitk.ErodeObjectMorphology.KernelType('Ball')
     radiusMM = 2
     # Does this take the ceil() of the erosion?
-    csfMask = sitk.ErodeObjectMorphology(binaryMask, radiusMM, kernel, 1, 0)
-    ## erodedMask = sitk.ErodeObjectMorphology(binaryMask, 2)
-    ## csfMask = sitk.BinaryThreshold(input_file * erodedMask, ### low, ### high, 1, 0)
-    csfMaskOnly = getLargestConnectedRegion(csfMask)
-    csfEroded = sitk.ErodeObjectMorphology(csfMaskOnly, 1)
-    # Binary dilation
-    csfDilated = sitk.DilateObjectMorphology(csfEroded, 5)
-    csfMaskFinal = getLargestConnectedRegion(csfDilated)
-    return csfMaskFinal * csfMask
-
+    erodedMask = sitk.ErodeObjectMorphology(binaryMask, radiusMM, kernel, 1, 0)
+    maskOnly = getLargestConnectedRegion(erodedMask)
+    return maskOnly
 
 def pipeline(**kwds):
     preproc = pipe.Workflow()
@@ -70,21 +69,19 @@ def pipeline(**kwds):
     sessions.iterables = ('session_id', sessionID)
 
     grabber = pipe.Node(interface=DataGrabber(infields=['session_id'],
-                                              outfields=['fmri_folder', 't1_file',
+                                              outfields=['fmri_dicom_dir', 't1_file',
                                                          'csf_file', 'wm_file']),
         name='dataGrabber')
     grabber.inputs.base_directory = '/paulsen'
     grabber.inputs.template = '*'
-    ### TODO: rename 'outfolder' to 'fmri_folder'
-    ### TODO: rename 'out_file' from t1grabber to 't1_file'
-    grabber.inputs.field_template = dict(fmri_folder='MRx/FMRI_HD_120/*/%s/%s/%s/*'
+    grabber.inputs.field_template = dict(fmri_dicom_dir='MRx/FMRI_HD_120/*/%s/%s/%s/*'
                                          t1_file='Experiments/20120722_JOY_DWI/FMRI_HD_120/*/%s/%s/%s_*_%s/T1.mgz'
-                                         csf_file='Experiments/20120801.SubjectOrganized_Results/PHD_120/*/%s/%s/POSTERIOR_CSF_TOTAL.nii.gz',
-                                         wm_file= 'Experiments/20120801.SubjectOrganized_Results/PHD_120/*/%s/%s/POSTERIOR_WM_TOTAL.nii.gz')
-    grabber.inputs.template_args = dict(fmri_folder=[['session_id', 'ANONRAW', 'FMRI_RestingStateConnectivity']],
+                                         csf_file='Experiments/20120801.SubjectOrganized_Results/PHD_120/*/%s/%s/%s.nii.gz',
+                                         wm_file= 'Experiments/20120801.SubjectOrganized_Results/PHD_120/*/%s/%s/%s.nii.gz')
+    grabber.inputs.template_args = dict(fmri_dicom_dir=[['session_id', 'ANONRAW', 'FMRI_RestingStateConnectivity']],
                                          t1_file=[['session_id', '10_AUTO.NN3Tv20110419','JOY_v51_2011', 'session_id']],
-                                         csf_file=[['session_id','ACCUMULATED_POSTERIORS']],
-                                         wm_file=[['session_id','ACCUMULATED_POSTERIORS']])
+                                         csf_file=[['session_id','ACCUMULATED_POSTERIORS', 'POSTERIOR_CSF_TOTAL']],
+                                         wm_file=[['session_id','ACCUMULATED_POSTERIORS', 'POSTERIOR_WM_TOTAL']])
 
     # fMRIgrabber = pipe.Node(interface=DataGrabber(infields=['session_id'],
     #                                               outfields=['outfolder']),
@@ -116,11 +113,11 @@ def pipeline(**kwds):
         grabber.inputs.session_id = sessionID[0]
         grabber.inputs.session_id = sessionID[0]
 
-    dicomNrrd = pipe.Node(interface=Function(), name='dicomToNrrd') # TODO: Flush this out
+    dicomNrrd = pipe.Node(interface=DWIconvert(), name='dicomToNrrd')
+    dicomNrrd.inputs.conversionMode = 'DicomToNrrd'
 
     to_3D = pipe.Node(interface=To3D(), name='afniTo3D')
     to_3D.inputs.outputtype = outputType
-    to_3D.inputs.infolder = # TODO: dataGrabber node
     to_3D.inputs.funcparams = "-time:zt ${numberOfSlices} ${numberOfVolumes} ${repetitionTime} alt-z" # TODO: connect to a string creation node
     to_3D.inputs.args = "-orient RAS" # TODO
     to_3D.inputs.filetype = 'epan'
@@ -137,9 +134,20 @@ def pipeline(**kwds):
     volreg.inputs.outputtype = outputType
     volreg.inputs.timeshift = False # 0
     volreg.inputs.zpad = 3
-    # volreg.outputs.onedfile = 'Rest_mt.1D' # TODO: Verify with Jatin if should connect to a dataGrabber?
     volreg.inputs.args = '-cubic -maxite 50 -x_thresh 0.001 -rot_thresh 0.001 -delta 0.1 -final Fourier \
                           -twopass -twodup -coarse 2 2 -coarserot -base 9 '
+    ### TODO: implement in Nipype
+    # volreg.inputs.cubic = True
+    # volreg.inpus.maxite = 50
+    # volreg.inpus.x_thresh = 0.001
+    # volreg.inpus.rot_thresh = 0.001
+    # volreg.inpus.delta = 0.1
+    # volreg.inpus.final = 'Fourier'
+    # volreg.inpus.twopass = True
+    # volreg.inpus.twodup = True
+    # volreg.inpus.coarse = [2, 2]
+    # volreg.inpus.coarserot = True
+    # volreg.inpus.base = 9
 
     tstat = pipe.Node(interface=TStat(), name='afni3DtStat')
     tstat.inputs.outputtype = outputType
@@ -162,11 +170,11 @@ def pipeline(**kwds):
     merge.inputs.doall = True
     merge.inputs.args = '-1noneg -1clip 100'
 
-    convert = pipe.Node(interface=MRIConvert(), name='freesurferMRIconvert')
-    convert.inputs.in_orientation = 'RAS'
-    convert.inputs.in_type = 'mgz'
-    convert.inputs.out_orientation = 'RAS'
-    convert.inputs.out_type = fOutputType
+    converter = pipe.Node(interface=MRIConvert(), name='freesurferMRIconvert')
+    converter.inputs.out_type = fOutputType
+    converter.inputs.in_orientation = 'RAS'
+    converter.inputs.in_type = 'mgz'
+    converter.inputs.out_orientation = 'RAS'
 
     register1 = pipe.Node(interface=Allineate(), name='afni3Dallineate1')
     register1.inputs.outputtype = outputType
@@ -194,10 +202,12 @@ def pipeline(**kwds):
 
     # Connect pipeline
     #1.
-    preproc.connect(grabber, 'fmri_folder', to_3D, 'infolder')
+    preproc.connect(grabber, 'fmri_dicom_dir', to_3D, 'infolder')
+    preproc.connect(grabber, 'fmri_dicom_dir', dicomNrrd, 'inputDicomDirectory')
+    preproc.connect(dicomNrrd, 'outputVolume', )
     preproc.connect(to_3D, 'out_file', refit, 'in_file')
     #2.
-    preproc.connect(to_3D, 'out_file', despike, 'in_file') # TODO: connect refit to despike???
+    preproc.connect(to_3D, 'out_file', despike, 'in_file')
     #3.
     preproc.connect(despike, 'out_file', volreg, 'in_file')
     #4.
@@ -207,13 +217,13 @@ def pipeline(**kwds):
     #5.
     preproc.connect(calc, 'out_file', fourier, 'in_file')
     #6.
-    preproc.connect(fourier, '_file', merge, 'in_file')
+    preproc.connect(fourier, 'out_file', merge, 'in_file')
     #7.
-    preproc.connect(grabber, 't1_file', convert, 'in_file')
+    preproc.connect(grabber, 't1_file', converter, 'in_file')
     #8.
-    preproc.connect(convert, 'out_file', register1, 'base_file')
+    preproc.connect(converter, 'out_file', register1, 'base_file')
     preproc.connect(calc, 'out_file', register1, 'in_file')
-    preproc.connect(convert, 'out_file', register1, 'master_file')
+    preproc.connect(converter, 'out_file', register1, 'master_file')
     preproc.connect(register1, 'onedmatrix', register2, 'onedmatrix')
     preproc.connect(fourier, 'out_file', register2, 'in_file')
     #9.
