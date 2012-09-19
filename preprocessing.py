@@ -110,11 +110,11 @@ def pipeline(**kwds):
     # t1grabber.inputs.template_args['wm_file'] = [['session_id', 'POSTERIOR_WM_TOTAL.nii.gz']]
 
     if len(sessionID) > 1:
-        preprocess.connect(sessions, 'session_id', fMRIgrabber, 'session_id')
-        preprocess.connect(sessions, 'session_id', t1grabber, 'session_id')
+        preprocess.connect(sessions, 'session_id', grabber, 'session_id')
+        preprocess.connect(sessions, 'session_id', grabber, 'session_id')
     else:
-        fMRIgrabber.inputs.session_id = sessionID[0]
-        t1grabber.inputs.session_id = sessionID[0]
+        grabber.inputs.session_id = sessionID[0]
+        grabber.inputs.session_id = sessionID[0]
 
     dicomNrrd = pipe.Node(interface=Function(), name='dicomToNrrd') # TODO: Flush this out
 
@@ -194,7 +194,7 @@ def pipeline(**kwds):
 
     # Connect pipeline
     #1.
-    preproc.connect(fMRIgrabber, 'outfolder', to_3D, 'infolder')
+    preproc.connect(grabber, 'fmir_folder', to_3D, 'infolder')
     preproc.connect(to_3D, 'out_file', refit, 'in_file')
     #2.
     preproc.connect(to_3D, 'out_file', despike, 'in_file') # TODO: connect refit to despike???
@@ -209,7 +209,7 @@ def pipeline(**kwds):
     #6.
     preproc.connect(fourier, '_file', merge, 'in_file')
     #7.
-    preproc.connect(t1grabber, 'out_file', convert, 'in_file')
+    preproc.connect(grabber, 't1_file', convert, 'in_file')
     #8.
     preproc.connect(convert, 'out_file', register1, 'base_file')
     preproc.connect(calc, 'out_file', register1, 'in_file')
@@ -217,8 +217,8 @@ def pipeline(**kwds):
     preproc.connect(register1, 'onedmatrix', register2, 'onedmatrix')
     preproc.connect(fourier, 'out_file', register2, 'in_file')
     #9.
-    preproc.connect(posteriorGrabber, 'csf_file', csfmask, 'input_file')
-    preproc.connect(posteriorGrabber, 'wm_file', wmmask, 'input_file')
+    preproc.connect(grabber, 'csf_file', csfmask, 'input_file')
+    preproc.connect(grabber, 'wm_file', wmmask, 'input_file')
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Preprocessing script for resting state fMRI')
