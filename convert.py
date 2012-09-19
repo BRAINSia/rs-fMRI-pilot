@@ -15,7 +15,7 @@ class DWIconvertInputSpec(CommandLineInputSpec):
                                  argstr='--conversionMode %s', usedefault=True,
                                  desc='Determine which conversion to perform')
     outputVolume = traits.Str(argstr='--outputVolume %s')
-    outputDirectory = Directory(os.path.cwd(), exists=True, argstr='--outputDirectory %s',
+    outputDirectory = Directory(os.path.getcwd(), exists=True, argstr='--outputDirectory %s',
                                 usedefault=True, desc='Directory holding the output NRRD format')
     inputDicomDirectory = Directory(exists=True, argstr='--inputDicomDirectory %s',
                                     usedefault=False, desc='Directory holding Dicom series')

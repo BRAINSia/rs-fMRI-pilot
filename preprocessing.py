@@ -11,11 +11,13 @@ from nipype.interfaces.io import DataSink, DataGrabber
 from nipype.interfaces.utility import Function, IdentityInterface
 from nipype.interfaces.afni.preprocess import *
 from nipype.interfaces.freesurfer.preprocess import *
-import dicom
 
 from .convert import *
 
 def readNrrdHeader(fileName):
+    """
+    Grep out the number of slices and volumes from the Nrrd file created by DWIConvert
+    """
     import re
     fID = open(fileName, 'r')
     try:
@@ -28,6 +30,22 @@ def readNrrdHeader(fileName):
     finally:
         fID.close()
     raise IOError('Nrrd file %s has regex match for slice and volume numbers!' % fileName)
+
+def strCreate(slices, volumes, repTime):
+    return "-time:zt %s %s %d alt-z" % (slices, volumes, repTime)
+
+def dicomRead(infolder):
+    """
+    Use PyDicom to get the DICOM repetition time
+    """
+    import os
+    import dicom
+    for ii in os.listdir(os.path.abspath(infolder)):
+        meta = dicom.read_file(ii)
+        if "RepetitionTime" in meta:
+            return meta.data_element('RepetitionTime')
+    raise Exception('None of the dicom files in %s contain \
+                     "Repetition Time" where PyDicom can find it!' % infolder)
 
 def generateTissueMask(inputLabelMap, low=0.0, high=1.0):
     """
@@ -116,9 +134,23 @@ def pipeline(**kwds):
     dicomNrrd = pipe.Node(interface=DWIconvert(), name='dicomToNrrd')
     dicomNrrd.inputs.conversionMode = 'DicomToNrrd'
 
+    grep = pipe.Node(interface=Function(function=readNrrdHeader(),
+                                        input_names=['fileName'],
+                                        output_names=['slices, volumes']),
+                                        name='nrrdGrep')
+
+    strCreate = pipe.Node(interface=Function(function=strCreate(),
+                                             input_names=['slices', 'volumes', 'repTime'],
+                                             output_names=['out_string']),
+                                             name='strCreate')
+
+    dicom = pipe.Node(interface=Function(function=dicomRead(),
+                                         input_names=['infolder'],
+                                         output_names=['repTime']),
+                                         name='dicomRead')
+
     to_3D = pipe.Node(interface=To3D(), name='afniTo3D')
     to_3D.inputs.outputtype = outputType
-    to_3D.inputs.funcparams = "-time:zt ${numberOfSlices} ${numberOfVolumes} ${repetitionTime} alt-z" # TODO: connect to a string creation node
     to_3D.inputs.args = "-orient RAS" # TODO
     to_3D.inputs.filetype = 'epan'
 
@@ -203,8 +235,13 @@ def pipeline(**kwds):
     # Connect pipeline
     #1.
     preproc.connect(grabber, 'fmri_dicom_dir', to_3D, 'infolder')
+    preproc.connect(grabber, 'fmri_dicom_dir', dicom, 'infolder')
     preproc.connect(grabber, 'fmri_dicom_dir', dicomNrrd, 'inputDicomDirectory')
-    preproc.connect(dicomNrrd, 'outputVolume', )
+    preproc.connect(dicomNrrd, 'outputVolume', grep, 'fileName')
+    preproc.connect(grep, 'slices', strCreate, 'slices')
+    preproc.connect(grep, 'volumes', strCreate, 'volumes')
+    preproc.connect(dicom, 'repTime', strCreate, 'repTime')
+    preproc.connect(strCreate, 'out_string', to_3D, 'funcparams')
     preproc.connect(to_3D, 'out_file', refit, 'in_file')
     #2.
     preproc.connect(to_3D, 'out_file', despike, 'in_file')
