@@ -27,11 +27,11 @@ def readNrrdHeader(fileName):
     # TODO: grep header for numberOfSlices and numberOfVolumes
     return numberOfSlices, numberOfVolumes
 
-def generateCSFMask(inputLabelMap, low=1, high=255):
+def generateTissueMask(inputLabelMap, low=1, high=255):
     import SimpleITK as sitk
 
     #GeodesicActiveContourLevelSet
-    def getLargestConnectedRegion(inputLabelMap):
+    def getLargestConnectedRegion(input_file):
         """
         Labels connected regions in order from largest (#1) to smallest,
         then thresholds to only return the largest region
@@ -42,12 +42,12 @@ def generateCSFMask(inputLabelMap, low=1, high=255):
         return largestLabel
 
     ## Compute brain mask
-    binaryMask = sitk.BinaryThreshold(inputLabelMap, low, high)
+    binaryMask = sitk.BinaryThreshold(input_file, low, high)
     erodedMask = binaryMask
     ## Its faster to erodedMask 10 times by 1 than to use a 10x10 element
     for i in range(1, 3):
         erodedMask = sitk.ErodeObjectMorphology(erodedMask, 1)
-    csfMask = sitk.BinaryThreshold(inputLabelMap * erodedMask, 4, 4, 1, 0)
+    csfMask = sitk.BinaryThreshold(input_file * erodedMask, 4, 4, 1, 0)
     csfMaskOnly = getLargestConnectedRegion(csfMask)
     csfEroded = sitk.ErodeObjectMorphology(csfMaskOnly, 1)
     # Binary dilation
@@ -150,6 +150,20 @@ def pipeline(**kwds):
     register2 = pipe.Node(interface=Allineate(), name='afni3Dallineate2')
     register2.inputs.outputtype = outputType
     register2.inputs.final = 'triquintic'
+
+    csfmask = pipe.Node(interface=Function(function=generateTissueMask,
+                                           input_names=['input_file','low', 'high'],
+                                           output_names=['output_file']),
+                        name='csfMask')
+    csfmask.inputs.low = 1
+    csfmask.inputs.high = 30
+
+    wmmask = pipe.Node(interface=Function(function=generateTissueMask,
+                                           input_names=['input_file','low', 'high'],
+                                           output_names=['output_file']),
+                        name='wmMask')
+    csfmask.inputs.low = #???
+    csfmask.inputs.high = #???
 
     # Connect pipeline
     #1.
