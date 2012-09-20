@@ -26,12 +26,12 @@ class DWIconvertOutputSpec(TraitedSpec):
 
 
 class DWIconvert(CommandLine):
-    _cmd = 'ipldev/sharedopt/20120722/Darwin_i386/DicomToNrrdConverter/DWIConvert-build/DWIConvert'
+    _cmd = '/ipldev/sharedopt/20120722/Darwin_i386/DicomToNrrdConverter/DWIConvert-build/DWIConvert'
     input_spec = DWIconvertInputSpec
     output_spec = DWIconvertOutputSpec
 
     def _format_arg(self, opt, spec, val):
-        return super(convert, self)._format_arg(self, opt, spec, val)
+        return super(DWIconvert, self)._format_arg(opt, spec, val)
 
     def _list_outputs(self):
         outputs = self._outputs().get()
