@@ -81,6 +81,10 @@ def pipeline(args):
     outputType = args.outputType
     fOutputType = args.fOutputType
     preproc = pipe.Workflow(name='rs_fmri_preprocessing')
+    preproc.config = { "logging": {"workflow_level": "DEBUG",
+                                   "log_directory": "/Volumes/scratch/testing"},
+                        "execution": {"remove_node_directories": True, "stop_on_first_crash":False}
+                        }
 
     sessions = pipe.Node(interface=IdentityInterface(fields=['session_id']), name='sessionIDs')
     sessions.iterables = ('session_id', sessionID)
@@ -92,7 +96,7 @@ def pipeline(args):
     grabber.inputs.base_directory = '/paulsen'
     grabber.inputs.template = '*'
     grabber.inputs.field_template = dict(fmri_dicom_dir='MRx/FMRI_HD_120/*/%s/%s/%s/*',
-                                         t1_file='Experiments/20120722_JOY_DWI/FMRI_HD_120/*/%s/%s/%s_*_%s/T1.mgz',
+                                         t1_file='Experiments/20120722_JOY_DWI/FMRI_HD_120/*/%s/%s/%s_*_%s_FS/mri/T1.mgz',
                                          csf_file='Experiments/20120801.SubjectOrganized_Results/PHD_120/*/%s/%s/%s.nii.gz',
                                          wm_file= 'Experiments/20120801.SubjectOrganized_Results/PHD_120/*/%s/%s/%s.nii.gz')
     grabber.inputs.template_args = dict(fmri_dicom_dir=[['session_id', 'ANONRAW', 'FMRI_RestingStateConnectivity']],
