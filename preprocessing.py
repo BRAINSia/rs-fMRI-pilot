@@ -87,6 +87,7 @@ def pipeline(args):
     outputType = args.outputType
     fOutputType = args.fOutputType
     preproc = pipe.Workflow(name='rs_fmri_preprocessing')
+    preproc.base_dir = os.getcwd()
 
     sessions = pipe.Node(interface=IdentityInterface(fields=['session_id']), name='sessionIDs')
     sessions.iterables = ('session_id', sessionID)
@@ -134,9 +135,9 @@ def pipeline(args):
     # to_3D.inputs.prefix = 'to_3D_out'
     to_3D.inputs.out_file = 'to_3D_out'
 
-    # refit = pipe.Node(interface=Refit(), name='afni3Drefit')
-    # refit.inputs.outputtype = outputType
-    # refit.inputs.deoblique = True
+    refit = pipe.Node(interface=Refit(), name='afni3Drefit')
+    refit.inputs.outputtype = outputType
+    refit.inputs.deoblique = True
 
     # despike = pipe.Node(interface=Despike(), name='afni3Ddespike')
     # despike.inputs.outputtype = outputType
@@ -229,7 +230,7 @@ def pipeline(args):
     preproc.connect(grep, 'volumes', to_3D_str, 'volumes')
     preproc.connect(dicom, 'repTime', to_3D_str, 'repTime')
     preproc.connect(to_3D_str, 'out_string', to_3D, 'funcparams')
-    # preproc.connect(to_3D, 'out_file', refit, 'in_file')
+    preproc.connect(to_3D, 'out_file', refit, 'in_file')
     # #2.
     # preproc.connect(to_3D, 'out_file', despike, 'in_file')
     # #3.
@@ -255,7 +256,6 @@ def pipeline(args):
     # preproc.connect(grabber, 'wm_file', wmmask, 'input_file')
 
     ### TODO: DataSink
-
     preproc.run()
 
 if __name__ == '__main__':
