@@ -188,9 +188,10 @@ def pipeline(args):
     #--------------------------------------------------------------------------------------
     converter = pipe.Node(interface=MRIConvert(), name='freesurferMRIconvert')
     converter.inputs.out_type = fOutputType
-    converter.inputs.in_orientation = 'RAS'
+    # converter.inputs.out_orientation = 'RAS'
     converter.inputs.in_type = 'mgz'
-    converter.inputs.out_orientation = 'RAS'
+    # converter.inputs.in_orientation = 'RAS'
+    converter.inputs.force_ras = True ### FIX???
     #--------------------------------------------------------------------------------------
     register1 = pipe.Node(interface=Allineate(), name='afni3Dallineate1')
     register1.inputs.outputtype = outputType
@@ -199,6 +200,9 @@ def pipeline(args):
     register1.inputs.cmass = True
     register1.inputs.interp = 'triquintic'
     register1.inputs.final = 'triquintic'
+    ### HACK
+    register1.inputs.out_file = 'junk'
+    ### END HACK
     #--------------------------------------------------------------------------------------
     register2 = pipe.Node(interface=Allineate(), name='afni3Dallineate2')
     register2.inputs.outputtype = outputType
@@ -247,13 +251,12 @@ def pipeline(args):
     preproc.connect(fourier, 'out_file', merge, 'in_files')
     #7.
     preproc.connect(grabber, 't1_file', converter, 'in_file')
-    #8.
     preproc.connect(converter, 'out_file', register1, 'base_file')
+    # preproc.connect(converter, 'out_file', register1, 'master_file')
     preproc.connect(calc, 'out_file', register1, 'in_file')
-    preproc.connect(converter, 'out_file', register1, 'master_file')
-    preproc.connect(register1, 'onedmatrix', register2, 'onedmatrix')
+    preproc.connect(register1, 'onedmatrix_save', register2, 'onedmatrix')
     preproc.connect(fourier, 'out_file', register2, 'in_file')
-    #9.
+    #8.
     preproc.connect(grabber, 'csf_file', csfmask, 'input_file')
     preproc.connect(grabber, 'wm_file', wmmask, 'input_file')
     ### TODO: DataSink
