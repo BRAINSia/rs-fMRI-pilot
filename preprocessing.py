@@ -6,6 +6,22 @@ import argparse
 import os
 import sys
 
+### HACK: Set PYTHONPATH, DYLD_LIBRARY_PATH, FREESURFER_HOME, and SUBJECTS_DIR for Athena ###
+os.environ['FREESURFER_HOME'] = '/opt/freesurfer'
+os.environ['SUBJECTS_DIR'] = '/paulsen/MRx'
+try:
+    old_path = os.environ['DYLD_LIBRARY_PATH']
+except KeyError:
+    old_path = ''
+try:
+    old_fallback = os.environ['DYLD_FALLBACK_LIBRARY_PATH']
+except KeyError:
+    old_fallback = ''
+os.environ['DYLD_LIBRARY_PATH'] = '/Volumes/scratch/welchdm/local/lib:' + old_path
+os.environ['DYLD_FALLBACK_LIBRARY_PATH'] = '/opt/afni-OSX_10.7:' + old_fallback
+sys.path.insert(1, '/Volumes/scratch/welchdm/src/nipype')
+### END HACK ###
+
 import nipype.pipeline.engine as pipe
 from nipype.interfaces.io import DataSink, DataGrabber
 from nipype.interfaces.utility import Function, IdentityInterface
@@ -49,7 +65,7 @@ def dicomRead(infolder):
     raise Exception('None of the dicom files in %s contain \
                      "Repetition Time" where PyDicom can find it!' % infolder)
 
-def generateTissueMask(input_file, low=0.0, high=1.0):
+def generateTissueMask(input_file, low=0.0, high=1.0, erodeFlag=False):
     """
     Using posterior tissue probability file, threshold by
     a low and/or high value, erode by 2mm, and take the ceil()
@@ -62,14 +78,15 @@ def generateTissueMask(input_file, low=0.0, high=1.0):
     image = reader.Execute()
     ## Compute brain mask
     binaryMask = sitk.BinaryThreshold(image, low, high, 1, 0)
-    # ball = sitk.ErodeObjectMorphologyImageFilter().Ball
-    radiusMM = 2
-    kernel = sitk.BinaryErodeImageFilter() # kernel = sitk.ErodeObjectMorphologyImageFilter()
-    kernel.SetKernelType(kernel.Ball)
-    kernel.SetKernelRadius(radiusMM)
-    # Does this take the ceil() of the erosion?
-    erodedMask = sitk.ErodeObjectMorphology(binaryMask, kernel.GetKernelType())
-    connected = sitk.ConnectedComponent(erodedMask)
+    if erodeFlag:
+        radiusMM = 2
+        kernel = sitk.BinaryErodeImageFilter() # kernel = sitk.ErodeObjectMorphologyImageFilter()
+        kernel.SetKernelType(kernel.Ball)
+        kernel.SetKernelRadius(radiusMM)
+        erodedMask = sitk.ErodeObjectMorphology(binaryMask, kernel.GetKernelType())
+        connected = sitk.ConnectedComponent(erodedMask)
+    else:
+        connected = sitk.ConnectedComponent(binaryMask)
     relabeled = sitk.RelabelComponent(connected)
     maskOnly = sitk.BinaryThreshold(relabeled, 1.0, 1.0, 1, 0)
     # maskOnly = getLargestConnectedRegion(erodedMask)
@@ -79,13 +96,6 @@ def generateTissueMask(input_file, low=0.0, high=1.0):
     return writer.GetFileName()
 
 def pipeline(args):
-    ### HACK: Set PYTHONPATH, DYLD_LIBRARY_PATH, FREESURFER_HOME, and SUBJECTS_DIR for Athena ###
-    os.environ['FREESURFER_HOME'] = '/opt/freesurfer'
-    os.environ['SUBJECTS_DIR'] = '/paulsen/MRx'
-    old_path = os.environ['DYLD_LIBRARY_PATH']
-    os.environ['DYLD_LIBRARY_PATH'] = '/Volumes/scratch/welchdm/local/lib:' + old_path
-    sys.path.insert(0, '/Volumes/scratch/welchdm/src/nipype')
-    ### END HACK ###
     sessionID = args.sessionID
     outputType = args.outputType
     fOutputType = args.fOutputType
@@ -131,7 +141,6 @@ def pipeline(args):
     #--------------------------------------------------------------------------------------
     to_3D = pipe.Node(interface=To3D(), name='afniTo3D')
     to_3D.inputs.outputtype = 'AFNI'
-    to_3D.inputs.orient = 'RAS'
     to_3D.inputs.datum = 'float'
     to_3D.inputs.filetype = 'epan'
     to_3D.inputs.prefix = 'to_3D_out'
@@ -161,6 +170,7 @@ def pipeline(args):
     volreg.inputs.coarse = [2, 2]
     volreg.inputs.coarserot = True
     volreg.inputs.base = 9
+    volreg.inputs.oned_file = 'volReg.1D'
     #--------------------------------------------------------------------------------------
     tstat = pipe.Node(interface=TStat(), name='afni3DtStat')
     tstat.inputs.outputtype = outputType
@@ -188,10 +198,8 @@ def pipeline(args):
     #--------------------------------------------------------------------------------------
     converter = pipe.Node(interface=MRIConvert(), name='freesurferMRIconvert')
     converter.inputs.out_type = fOutputType
-    # converter.inputs.out_orientation = 'RAS'
     converter.inputs.in_type = 'mgz'
-    # converter.inputs.in_orientation = 'RAS'
-    converter.inputs.force_ras = True ### FIX???
+    converter.inputs.force_ras = True
     #--------------------------------------------------------------------------------------
     register1 = pipe.Node(interface=Allineate(), name='afni3Dallineate1')
     register1.inputs.outputtype = outputType
@@ -200,27 +208,68 @@ def pipeline(args):
     register1.inputs.cmass = True
     register1.inputs.interp = 'triquintic'
     register1.inputs.final = 'triquintic'
+    register1.inputs.onedmatrix_save = True
     ### HACK
-    register1.inputs.out_file = 'junk'
+    register1.inputs.out_file = 'register1.nii'
     ### END HACK
     #--------------------------------------------------------------------------------------
     register2 = pipe.Node(interface=Allineate(), name='afni3Dallineate2')
     register2.inputs.outputtype = outputType
     register2.inputs.final = 'triquintic'
+    ### HACK
+    register2.inputs.out_file = 'register2.nii'
+    ### END HACK
     #--------------------------------------------------------------------------------------
     csfmask = pipe.Node(interface=Function(function=generateTissueMask,
-                                           input_names=['input_file','low', 'high'],
+                                           input_names=['input_file','low', 'high', 'erodeFlag'],
                                            output_names=['output_file']),
                         name='csfMask')
     csfmask.inputs.low = 0.99
     csfmask.inputs.high = 1.0
+    csfmask.inputs.erodeFlag = False
     #--------------------------------------------------------------------------------------
     wmmask = pipe.Node(interface=Function(function=generateTissueMask,
-                                           input_names=['input_file','low', 'high'],
+                                           input_names=['input_file','low', 'high', 'erodeFlag'],
                                            output_names=['output_file']),
                         name='wmMask')
     wmmask.inputs.low = 0.99
     wmmask.inputs.low = 1.0
+    wmmask.inputs.erodeFlag = True
+    #--------------------------------------------------------------------------------------
+    # csfAvg = pipe.Node(interface=Maskave(), name='afni3DmaskAve_csf')
+    # csfAvg.inputs.outputtype = outputType
+    # csfAvg.inputs.args = '-median -mrange 1 1'
+    # csfAvg.inputs.quiet = True
+    #--------------------------------------------------------------------------------------
+    # wmAvg = pipe.Node(interface=Maskave(), name='afni3DmaskAve_wm')
+    # wmAvg.inputs.outputtype = outputType
+    # wmAvg.inputs.args = '-median -mrange 1 2'
+    # wmAvg.inputs.quiet = True
+    #--------------------------------------------------------------------------------------
+    # deconvolve = pipe.Node(interface=Deconvolve(), name='afni3Ddeconvolve')
+    # deconvolve.inputs.outputtype = outputType
+    # deconvolve.inputs.in_file = 'Rest_bp+tlrc'
+    # deconvolve.inputs.mask = 't1h+tlrc.nii'
+    # deconvolve.inputs.ignoreWarnings = 4
+    # deconvolve.inputs.nullHypothesisPolynomialDegree = 1 # polort
+    # ### DON'T NEED - can calculate
+    # ### deconvolve.inputs.numberOfStimulusTimeSeries = 8 # num_stimts
+    # deconvolve.inputs.stimulusTimeSeries = {'Median_CSF':Median_B2_CSF.1D,
+    #                                         'Median_WM':Median_WM.1D,
+    #                                         'roll':[Rest_mt.1D[1], 3],
+    #                                         'pitch':[Rest_mt.1D[2],4],
+    #                                         'yaw':[Rest_mt.1D[3], 5],
+    #                                         'ds':[Rest_mt.1D[4], 6],
+    #                                         'dl':[Rest_mt.1D[5], 7],
+    #                                         'dP':[Rest_mt.1D[6], 8]}
+    # deconvolve.inputs.full_first = True
+    # deconvolve.inputs.float = True
+    # deconvolve.inputs.tout = True
+    # deconvolve.inputs.rout = True
+    # deconvolve.inputs.fout = True
+    # deconvolve.inputs.bucket = 'Rest_bp_Decon+tlr'
+    # deconvolve.inputs.fitts = 'full_fitts_Decon+tlrc'
+    # deconvolve.inputs.errts = 'errts_Decon+tlrc'
     #--------------------------------------------------------------------------------------
     # Connect pipeline
     if len(sessionID) > 1:
@@ -254,17 +303,20 @@ def pipeline(args):
     preproc.connect(converter, 'out_file', register1, 'base_file')
     # preproc.connect(converter, 'out_file', register1, 'master_file')
     preproc.connect(calc, 'out_file', register1, 'in_file')
-    preproc.connect(register1, 'onedmatrix_save', register2, 'onedmatrix')
+    preproc.connect(register1, 'onedmatrix_out', register2, 'onedmatrix')
     preproc.connect(fourier, 'out_file', register2, 'in_file')
     #8.
     preproc.connect(grabber, 'csf_file', csfmask, 'input_file')
     preproc.connect(grabber, 'wm_file', wmmask, 'input_file')
+    #9.
+    # preproc.connect(csfmask, 'output_file', csfAvg, 'mask')
+    # preproc.connect(fourier, 'out_file', csfAvg, 'in_file')
+    # preproc.connect(wmmask, 'output_file', wmAvg, 'mask')
+    # preproc.connect(fourier, 'out_file', wmAvg, 'in_file')
+    ### TODO: Complete phase 2
     ### TODO: DataSink
     preproc.write_graph()
     preproc.run()
-    ### HACK ###
-    os.environ['DYLD_LIBRARY_PATH'] = old_path
-    ### END HACK ###
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Preprocessing script for resting state fMRI')
@@ -279,4 +331,12 @@ if __name__ == '__main__':
                              "AFNI" : "afni",
                              "NIFTI" : "nii"}
     args.fOutputType = freesurferOutputTypes[args.outputType]
-    sys.exit(pipeline(args))
+    outvalue = pipeline(args)
+    ### HACK ###
+    os.environ['FREESURFER_HOME'] = ''
+    os.environ['SUBJECTS_DIR'] = ''
+    os.environ['DYLD_LIBRARY_PATH'] = old_path
+    os.environ['DYLD_FALLBACK_LIBRARY_PATH'] = old_fallback
+    sys.path.pop(1)
+    ### END HACK ###
+    sys.exit(outvalue)
