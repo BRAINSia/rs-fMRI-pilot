@@ -134,10 +134,8 @@ def pipeline(args):
                                              output_names=['out_string']),
                                              name='strCreate')
     #--------------------------------------------------------------------------------------
-    dicom = pipe.Node(interface=Function(function=dicomRead,
-                                         input_names=['infolder'],
-                                         output_names=['repTime']),
-                                         name='dicomRead')
+    dicom = pipe.Node(interface=Function(function=dicomRead, input_names=['infolder'],
+                                         output_names=['repTime']), name='dicomRead')
     #--------------------------------------------------------------------------------------
     to_3D = pipe.Node(interface=To3D(), name='afniTo3D')
     to_3D.inputs.outputtype = 'AFNI'
@@ -153,7 +151,7 @@ def pipeline(args):
     despike.inputs.outputtype = outputType
     despike.inputs.ignore = 4
     despike.inputs.in_file = os.path.join(os.getcwd(), 'rs_fmri_preprocessing',
-                                          'afni3Drefit', 'to_3D_out+orig.BRIK')
+                                          'afni3Drefit', 'to_3D_out+orig.BRIK') # TODO
     #--------------------------------------------------------------------------------------
     volreg = pipe.Node(interface=Volreg(), name='afni3DvolReg')
     volreg.inputs.outputtype = outputType
@@ -196,10 +194,17 @@ def pipeline(args):
     # merge.inputs.onenoneg = True
     # merge.inputs.oneclip = 100
     #--------------------------------------------------------------------------------------
+    automask = pipe.Node(interface=Automask(), name='afni3Dautomask')
+    automask.inputs.outputtype = outputType
+    automask.inputs.dilate = 1
+    #--------------------------------------------------------------------------------------
     converter = pipe.Node(interface=MRIConvert(), name='freesurferMRIconvert')
     converter.inputs.out_type = fOutputType
     converter.inputs.in_type = 'mgz'
     converter.inputs.force_ras = True
+    #--------------------------------------------------------------------------------------
+    skullstrip = pipe.Node(interface=SkullStrip(), name='afni3DskullStrip')
+    skullstrip.inputs.outputtype = outputType
     #--------------------------------------------------------------------------------------
     register1 = pipe.Node(interface=Allineate(), name='afni3Dallineate1')
     register1.inputs.outputtype = outputType
@@ -236,40 +241,38 @@ def pipeline(args):
     wmmask.inputs.low = 1.0
     wmmask.inputs.erodeFlag = True
     #--------------------------------------------------------------------------------------
-    # csfAvg = pipe.Node(interface=Maskave(), name='afni3DmaskAve_csf')
-    # csfAvg.inputs.outputtype = outputType
-    # csfAvg.inputs.args = '-median -mrange 1 1'
-    # csfAvg.inputs.quiet = True
+    csfAvg = pipe.Node(interface=Maskave(), name='afni3DmaskAve_csf')
+    csfAvg.inputs.outputtype = outputType
+    csfAvg.inputs.args = '-median -mrange 1 1' # TODO
+    csfAvg.inputs.quiet = True
     #--------------------------------------------------------------------------------------
-    # wmAvg = pipe.Node(interface=Maskave(), name='afni3DmaskAve_wm')
-    # wmAvg.inputs.outputtype = outputType
-    # wmAvg.inputs.args = '-median -mrange 1 2'
-    # wmAvg.inputs.quiet = True
+    wmAvg = pipe.Node(interface=Maskave(), name='afni3DmaskAve_wm')
+    wmAvg.inputs.outputtype = outputType
+    wmAvg.inputs.args = '-median -mrange 1 2' # TODO
+    wmAvg.inputs.quiet = True
     #--------------------------------------------------------------------------------------
-    # deconvolve = pipe.Node(interface=Deconvolve(), name='afni3Ddeconvolve')
-    # deconvolve.inputs.outputtype = outputType
-    # deconvolve.inputs.in_file = 'Rest_bp+tlrc'
-    # deconvolve.inputs.mask = 't1h+tlrc.nii'
-    # deconvolve.inputs.ignoreWarnings = 4
-    # deconvolve.inputs.nullHypothesisPolynomialDegree = 1 # polort
-    # ### DON'T NEED - can calculate
-    # ### deconvolve.inputs.numberOfStimulusTimeSeries = 8 # num_stimts
-    # deconvolve.inputs.stimulusTimeSeries = {'Median_CSF':Median_B2_CSF.1D,
-    #                                         'Median_WM':Median_WM.1D,
-    #                                         'roll':[Rest_mt.1D[1], 3],
-    #                                         'pitch':[Rest_mt.1D[2],4],
-    #                                         'yaw':[Rest_mt.1D[3], 5],
-    #                                         'ds':[Rest_mt.1D[4], 6],
-    #                                         'dl':[Rest_mt.1D[5], 7],
-    #                                         'dP':[Rest_mt.1D[6], 8]}
-    # deconvolve.inputs.full_first = True
-    # deconvolve.inputs.float = True
-    # deconvolve.inputs.tout = True
-    # deconvolve.inputs.rout = True
-    # deconvolve.inputs.fout = True
-    # deconvolve.inputs.bucket = 'Rest_bp_Decon+tlr'
-    # deconvolve.inputs.fitts = 'full_fitts_Decon+tlrc'
-    # deconvolve.inputs.errts = 'errts_Decon+tlrc'
+    deconvolve = pipe.Node(interface=Deconvolve(fileCount=3, seriesCount=8), name='afni3Ddeconvolve')
+    deconvolve.inputs.outputtype = outputType
+    deconvolve.inputs.ignoreWarnings = 4
+    deconvolve.inputs.nullHypothesisPolynomialDegree = 1
+    deconvolve.inputs.full_first = True
+    deconvolve.inputs.is_float = True
+    deconvolve.inputs.tout = True
+    deconvolve.inputs.rout = True
+    deconvolve.inputs.fout = True
+    deconvolve.inputs.bucket = 'Rest_bp_Decon+tlr'
+    deconvolve.inputs.fitts = 'full_fitts_Decon+tlrc'
+    deconvolve.inputs.errts = 'errts_Decon+tlrc'
+    #--------------------------------------------------------------------------------------
+    detrend = pipe.Node(interface=Detrend(), name='afni3Ddetrend')
+    detrend.inputs.outputtype = outputType
+    detrend.inputs.out_file = 'errts_Decon_dt+tlrc'
+    detrend.inputs.args = '-polort 3' # TODO
+    #--------------------------------------------------------------------------------------
+    regionAvg = pipe.Node(interface=Maskave(), name='afni3DmaskAve_region')
+    regionAvg.inputs.outputtype = outputType
+    regionAvg.inputs.args = '-median -mrange 1 1' # TODO
+    regionAvg.inputs.quiet = True
     #--------------------------------------------------------------------------------------
     # Connect pipeline
     if len(sessionID) > 1:
@@ -300,23 +303,45 @@ def pipeline(args):
     preproc.connect(fourier, 'out_file', merge, 'in_files')
     #7.
     preproc.connect(grabber, 't1_file', converter, 'in_file')
-    preproc.connect(converter, 'out_file', register1, 'base_file')
+    preproc.connect(converter, 'out_file', skullstrip, 'in_file')
+    preproc.connect(skullstrip, 'out_file', register1, 'base_file')
     # preproc.connect(converter, 'out_file', register1, 'master_file')
     preproc.connect(calc, 'out_file', register1, 'in_file')
     preproc.connect(register1, 'onedmatrix_out', register2, 'onedmatrix')
-    preproc.connect(fourier, 'out_file', register2, 'in_file')
+    preproc.connect(fourier, 'out_file', automask, 'in_file')
+    preproc.connect(automask, 'out_file', register2, 'in_file')
     #8.
     preproc.connect(grabber, 'csf_file', csfmask, 'input_file')
     preproc.connect(grabber, 'wm_file', wmmask, 'input_file')
     #9.
-    # preproc.connect(csfmask, 'output_file', csfAvg, 'mask')
-    # preproc.connect(fourier, 'out_file', csfAvg, 'in_file')
-    # preproc.connect(wmmask, 'output_file', wmAvg, 'mask')
-    # preproc.connect(fourier, 'out_file', wmAvg, 'in_file')
-    ### TODO: Complete phase 2
+    preproc.connect(csfmask, 'output_file', csfAvg, 'mask')
+    preproc.connect(fourier, 'out_file', csfAvg, 'in_file')
+    preproc.connect(wmmask, 'output_file', wmAvg, 'mask')
+    preproc.connect(fourier, 'out_file', wmAvg, 'in_file')
+    preproc.connect(fourier, 'out_file', deconvolve, 'in_file')
+    preproc.connect(automask, 'out_file', deconvolve, 'mask') ### VERIFY WITH JATIN!!!
+    preproc.connect(csfAvg, 'out_file', deconvolve, 'stim_file_1')
+    deconvolve.inputs.stim_label_1 = "Median_CSF"
+    preproc.connect(wmAvg, 'out_file', deconvolve, 'stim_file_2')
+    deconvolve.inputs.stim_label_2 = "Median_WM"
+    preproc.connect(volreg, 'oned_file', deconvolve, 'stim_file_3')
+    deconvolve.inputs.stim_label_3 = "roll"
+    deconvolve.inputs.is_stim_base_3 = True
+    deconvolve.inputs.stim_label_4 = 'pitch'
+    deconvolve.inputs.is_stim_base_4 = True
+    deconvolve.inputs.stim_label_5 = 'yaw'
+    deconvolve.inputs.is_stim_base_5 = True
+    deconvolve.inputs.stim_label_6 = 'dS'
+    deconvolve.inputs.is_stim_base_6 = True
+    deconvolve.inputs.stim_label_7 = 'dL'
+    deconvolve.inputs.is_stim_base_7 = True
+    deconvolve.inputs.stim_label_8 = 'dP'
+    deconvolve.inputs.is_stim_base_8 = True
+    preproc.connect(deconvolve, 'out_errts', detrend, 'in_file')
     ### TODO: DataSink
     preproc.write_graph()
-    preproc.run()
+    preproc.write_hierarchical_dotfile(dotfilename='dave.dot')
+    # preproc.run()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Preprocessing script for resting state fMRI')
