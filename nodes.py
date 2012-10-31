@@ -1,35 +1,10 @@
-#!/usr/bin/env python
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
 
-import argparse
-import os
-import sys
-
-### HACK: Set PYTHONPATH, DYLD_LIBRARY_PATH, FREESURFER_HOME, and SUBJECTS_DIR for Athena ###
-os.environ['FREESURFER_HOME'] = '/opt/freesurfer'
-os.environ['SUBJECTS_DIR'] = '/paulsen/MRx'
-try:
-    old_path = os.environ['DYLD_LIBRARY_PATH']
-except KeyError:
-    old_path = ''
-try:
-    old_fallback = os.environ['DYLD_FALLBACK_LIBRARY_PATH']
-except KeyError:
-    old_fallback = ''
-os.environ['DYLD_LIBRARY_PATH'] = '/Volumes/scratch/welchdm/local/lib:' + old_path
-os.environ['DYLD_FALLBACK_LIBRARY_PATH'] = '/opt/afni-OSX_10.7:' + old_fallback
-sys.path.insert(1, '/Volumes/scratch/welchdm/src/nipype')
-### END HACK ###
-
-import nipype.pipeline.engine as pipe
 from nipype.interfaces.io import DataSink, DataGrabber
 from nipype.interfaces.utility import Function, IdentityInterface
 from nipype.interfaces.afni.preprocess import *
 from nipype.interfaces.freesurfer.preprocess import *
-
-from convert import *
-from nodes import *  ### TODO!!!
 
 def readNrrdHeader(fileName):
     """
@@ -96,7 +71,7 @@ def generateTissueMask(input_file, low=0.0, high=1.0, erodeFlag=False):
     writer.Execute(maskOnly)
     return writer.GetFileName()
 
-def pipeline(args):
+def sessionNode(outputType):
     sessionID = args.sessionID
     outputType = args.outputType
     fOutputType = args.fOutputType
@@ -275,94 +250,3 @@ def pipeline(args):
     regionAvg.inputs.args = '-median -mrange 1 1' # TODO
     regionAvg.inputs.quiet = True
     #--------------------------------------------------------------------------------------
-    # Connect pipeline
-    if len(sessionID) > 1:
-        preproc.connect(sessions, 'session_id', grabber, 'session_id')
-    else:
-        grabber.inputs.session_id = sessionID[0]
-    #1.
-    preproc.connect(grabber, 'fmri_dicom_dir', to_3D, 'infolder')
-    preproc.connect(grabber, 'fmri_dicom_dir', dicom, 'infolder')
-    preproc.connect(grabber, 'fmri_dicom_dir', dicomNrrd, 'inputDicomDirectory')
-    preproc.connect(dicomNrrd, 'outputVolume', grep, 'fileName')
-    preproc.connect(grep, 'slices', to_3D_str, 'slices')
-    preproc.connect(grep, 'volumes', to_3D_str, 'volumes')
-    preproc.connect(dicom, 'repTime', to_3D_str, 'repTime')
-    preproc.connect(to_3D_str, 'out_string', to_3D, 'funcparams')
-    preproc.connect(to_3D, 'out_file', refit, 'in_file')
-    #2.
-    preproc.connect(refit, 'out_file', despike, 'in_file')
-    #3.
-    preproc.connect(despike, 'out_file', volreg, 'in_file')
-    #4.
-    preproc.connect(volreg, 'out_file', tstat, 'in_file')
-    preproc.connect(volreg, 'out_file', calc, 'in_file_a')
-    preproc.connect(tstat, 'out_file', calc, 'in_file_b')
-    #5.
-    preproc.connect(calc, 'out_file', fourier, 'in_file')
-    #6.
-    preproc.connect(fourier, 'out_file', merge, 'in_files')
-    #7.
-    preproc.connect(grabber, 't1_file', converter, 'in_file')
-    preproc.connect(converter, 'out_file', skullstrip, 'in_file')
-    preproc.connect(skullstrip, 'out_file', register1, 'base_file')
-    # preproc.connect(converter, 'out_file', register1, 'master_file')
-    preproc.connect(calc, 'out_file', register1, 'in_file')
-    preproc.connect(register1, 'onedmatrix_out', register2, 'onedmatrix')
-    preproc.connect(fourier, 'out_file', automask, 'in_file')
-    preproc.connect(automask, 'out_file', register2, 'in_file')
-    #8.
-    preproc.connect(grabber, 'csf_file', csfmask, 'input_file')
-    preproc.connect(grabber, 'wm_file', wmmask, 'input_file')
-    #9.
-    preproc.connect(csfmask, 'output_file', csfAvg, 'mask')
-    preproc.connect(fourier, 'out_file', csfAvg, 'in_file')
-    preproc.connect(wmmask, 'output_file', wmAvg, 'mask')
-    preproc.connect(fourier, 'out_file', wmAvg, 'in_file')
-    preproc.connect(fourier, 'out_file', deconvolve, 'in_file')
-    preproc.connect(automask, 'out_file', deconvolve, 'mask') ### VERIFY WITH JATIN!!!
-    preproc.connect(csfAvg, 'out_file', deconvolve, 'stim_file_1')
-    deconvolve.inputs.stim_label_1 = "Median_CSF"
-    preproc.connect(wmAvg, 'out_file', deconvolve, 'stim_file_2')
-    deconvolve.inputs.stim_label_2 = "Median_WM"
-    preproc.connect(volreg, 'oned_file', deconvolve, 'stim_file_3')
-    deconvolve.inputs.stim_label_3 = "roll"
-    deconvolve.inputs.is_stim_base_3 = True
-    deconvolve.inputs.stim_label_4 = 'pitch'
-    deconvolve.inputs.is_stim_base_4 = True
-    deconvolve.inputs.stim_label_5 = 'yaw'
-    deconvolve.inputs.is_stim_base_5 = True
-    deconvolve.inputs.stim_label_6 = 'dS'
-    deconvolve.inputs.is_stim_base_6 = True
-    deconvolve.inputs.stim_label_7 = 'dL'
-    deconvolve.inputs.is_stim_base_7 = True
-    deconvolve.inputs.stim_label_8 = 'dP'
-    deconvolve.inputs.is_stim_base_8 = True
-    preproc.connect(deconvolve, 'out_errts', detrend, 'in_file')
-    ### TODO: DataSink
-    preproc.write_graph()
-    preproc.write_hierarchical_dotfile(dotfilename='dave.dot')
-    # preproc.run()
-
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Preprocessing script for resting state fMRI')
-    parser.add_argument('-t', '--filetype', action='store', dest='outputType', type=str, required=False,
-                        default='NIFTI', help='File type for outputs.  Values: "NIFTI_GZ", "AFNI", "NIFTI" (default)')
-    parser.add_argument('-n','--name', action='store', dest='name', type=str, required=True,
-                        help='Name (required)')
-    parser.add_argument('-s', '--session', action='store', dest='sessionID', type=int, required=True,
-                        nargs='*', help='list of session IDs (required)')
-    args = parser.parse_args()
-    freesurferOutputTypes = {"NIFTI_GZ" : "niigz",
-                             "AFNI" : "afni",
-                             "NIFTI" : "nii"}
-    args.fOutputType = freesurferOutputTypes[args.outputType]
-    outvalue = pipeline(args)
-    ### HACK ###
-    os.environ['FREESURFER_HOME'] = ''
-    os.environ['SUBJECTS_DIR'] = ''
-    os.environ['DYLD_LIBRARY_PATH'] = old_path
-    os.environ['DYLD_FALLBACK_LIBRARY_PATH'] = old_fallback
-    sys.path.pop(1)
-    ### END HACK ###
-    sys.exit(outvalue)
