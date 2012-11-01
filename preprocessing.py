@@ -207,23 +207,23 @@ def pipeline(args):
     skullstrip = pipe.Node(interface=SkullStrip(), name='afni3DskullStrip')
     skullstrip.inputs.outputtype = outputType
     #--------------------------------------------------------------------------------------
-    register1 = pipe.Node(interface=Allineate(), name='afni3Dallineate1')
-    register1.inputs.outputtype = outputType
-    register1.inputs.warp = 'shift_rotate'
-    register1.inputs.cost = 'mutualinfo'
-    register1.inputs.cmass = True
-    register1.inputs.interp = 'triquintic'
-    register1.inputs.final = 'triquintic'
-    register1.inputs.onedmatrix_save = True
+    allineate1 = pipe.Node(interface=Allineate(), name='afni3Dallineate1')
+    allineate1.inputs.outputtype = outputType
+    allineate1.inputs.warp = 'shift_rotate'
+    allineate1.inputs.cost = 'mutualinfo'
+    allineate1.inputs.cmass = True
+    allineate1.inputs.interp = 'triquintic'
+    allineate1.inputs.final = 'triquintic'
+    allineate1.inputs.onedmatrix_save = True
     ### HACK
-    register1.inputs.out_file = 'register1.nii'
+    allineate1.inputs.out_file = 'allineate1.nii'
     ### END HACK
     #--------------------------------------------------------------------------------------
-    register2 = pipe.Node(interface=Allineate(), name='afni3Dallineate2')
-    register2.inputs.outputtype = outputType
-    register2.inputs.final = 'triquintic'
+    allineate2 = pipe.Node(interface=Allineate(), name='afni3Dallineate2')
+    allineate2.inputs.outputtype = outputType
+    allineate2.inputs.final = 'triquintic'
     ### HACK
-    register2.inputs.out_file = 'register2.nii'
+    allineate2.inputs.out_file = 'allineate2.nii'
     ### END HACK
     #--------------------------------------------------------------------------------------
     csfmask = pipe.Node(interface=Function(function=generateTissueMask,
@@ -280,8 +280,7 @@ def pipeline(args):
         preproc.connect(sessions, 'session_id', grabber, 'session_id')
     else:
         grabber.inputs.session_id = sessionID[0]
-    #1.
-    preproc.connect(grabber, 'fmri_dicom_dir', to_3D, 'infolder')
+    preproc.connect(grabber, 'fmri_dicom_dir', to_3D, 'infolder')         #1
     preproc.connect(grabber, 'fmri_dicom_dir', dicom, 'infolder')
     preproc.connect(grabber, 'fmri_dicom_dir', dicomNrrd, 'inputDicomDirectory')
     preproc.connect(dicomNrrd, 'outputVolume', grep, 'fileName')
@@ -290,27 +289,28 @@ def pipeline(args):
     preproc.connect(dicom, 'repTime', to_3D_str, 'repTime')
     preproc.connect(to_3D_str, 'out_string', to_3D, 'funcparams')
     preproc.connect(to_3D, 'out_file', refit, 'in_file')
-    #2.
-    preproc.connect(refit, 'out_file', despike, 'in_file')
-    #3.
-    preproc.connect(despike, 'out_file', volreg, 'in_file')
-    #4.
-    preproc.connect(volreg, 'out_file', tstat, 'in_file') #### Changed!!!
-    preproc.connect(volreg, 'out_file', calc, 'in_file_a') #### CHANGED!!!
+    preproc.connect(refit, 'out_file', despike, 'in_file')                #2
+    preproc.connect(despike, 'out_file', volreg, 'in_file')               #3
+    preproc.connect(volreg, 'out_file', zpad, 'in_file')                  #4
+    preproc.connect(zpad, 'out_file', merge, 'in_file')                   #5
+    preproc.connect(merge, 'out_file', automask, 'in_file')               #6
+    preproc.connect(merge, 'out_file', tstat, 'mean_file')                #7
+    preproc.connect(merge, 'out_file', calc, 'in_file_a')
+    preproc.connect(automask, 'out_file', tstat, 'mask_file')
     preproc.connect(tstat, 'out_file', calc, 'in_file_b')
-    #5.
-    preproc.connect(calc, 'out_file', fourier, 'in_file')
-    #6.
-    preproc.connect(fourier, 'out_file', merge, 'in_files')
-    #7.
-    preproc.connect(grabber, 't1_file', converter, 'in_file')
-    preproc.connect(converter, 'out_file', skullstrip, 'in_file')
-    preproc.connect(skullstrip, 'out_file', register1, 'base_file')
-    # preproc.connect(converter, 'out_file', register1, 'master_file')
-    preproc.connect(calc, 'out_file', register1, 'in_file')
-    preproc.connect(register1, 'onedmatrix_out', register2, 'onedmatrix')
-    preproc.connect(fourier, 'out_file', automask, 'in_file')
-    preproc.connect(automask, 'out_file', register2, 'in_file')
+    preproc.connect(calc, 'out_file', fourier, 'in_file')                 #8
+    ### preproc.connect(fourier, 'out_file', merge, 'in_files')
+    preproc.connect(grabber, 't1_file', converter, 'in_file')             #9
+    preproc.connect(converter, 'out_file', allineate1, 'base_file')
+    preproc.connect(tstat, 'out_file', allineate1, 'source_file')
+    preproc.connect(converter, 'out_file', allineate2, 'master_file')
+    preproc.connect(allineate1, 'onedmatrix_out', allineate2, 'onedmatrix')
+    preproc.connect(merge, 'out_file', allineate2, 'in_file')
+    ### BEGIN PART TWO
+    ### preproc.connect(converter, 'out_file', skullstrip, 'in_file')
+    ### preproc.connect(skullstrip, 'out_file', allineate1, 'base_file')
+    ### preproc.connect(fourier, 'out_file', automask, 'in_file')
+    ### preproc.connect(automask, 'out_file', allineate2, 'in_file')
     #8.
     preproc.connect(grabber, 'csf_file', csfmask, 'input_file')
     preproc.connect(grabber, 'wm_file', wmmask, 'input_file')
