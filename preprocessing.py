@@ -295,8 +295,8 @@ def pipeline(args):
     #3.
     preproc.connect(despike, 'out_file', volreg, 'in_file')
     #4.
-    preproc.connect(volreg, 'out_file', tstat, 'in_file')
-    preproc.connect(volreg, 'out_file', calc, 'in_file_a')
+    preproc.connect(volreg, 'out_file', tstat, 'in_file') #### Changed!!!
+    preproc.connect(volreg, 'out_file', calc, 'in_file_a') #### CHANGED!!!
     preproc.connect(tstat, 'out_file', calc, 'in_file_b')
     #5.
     preproc.connect(calc, 'out_file', fourier, 'in_file')
