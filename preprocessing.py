@@ -19,26 +19,33 @@ try:
     old_fallback = os.environ['DYLD_FALLBACK_LIBRARY_PATH']
 except KeyError:
     old_fallback = ''
-os.environ['PATH'] = '/Volumes/scratch/welchdm/bld/BSA-SyNTesting/bin' + old_path
+
+os.environ['PATH'] = '/Volumes/scratch/welchdm/bld/BSA-SyNTesting/bin:' + \
+    '/opt/afni-OSX_10.7:' + '/opt/freesurfer_v4.5.0-full/bin:' + old_path
+
 os.environ['DYLD_LIBRARY_PATH'] = '/Volumes/scratch/welchdm/bld/BSA-SyNTesting/lib:' + \
-  '/Volumes/scratch/welchdm/bld/BSA-SyNTesting/bin:' + old_dyld
+    '/Volumes/scratch/welchdm/bld/BSA-SyNTesting/bin:' + \
+    '/opt/freesurfer_v4.5.0-full/lib:' + old_dyld
+
 os.environ['DYLD_FALLBACK_LIBRARY_PATH'] = '/opt/afni-OSX_10.7:' + old_fallback
+
 sys.path.insert(1, '/Volumes/scratch/welchdm/src/nipype/nipype')
 sys.path.insert(2, '/Volumes/scratch/welchdm/bld/BSA-SyNTesting/SimpleITK-build/lib')
+sys.path.insert(3, '/Volumes/scratch/welchdm/src/BRAINSStandAlone/AutoWorkup')
 ### END HACK ###
 
-# from BRAINSTools import BRAINSFit
-# from nipype.interfaces.ants.registration import Registration
-# from nipype.interfaces.ants.resampling import ApplyTransforms
+from BRAINSTools import BRAINSFit
+from nipype.interfaces.ants.registration import Registration
+from nipype.interfaces.ants.resampling import ApplyTransforms
 from nipype.interfaces.afni.preprocess import *
 from nipype.interfaces.freesurfer.preprocess import *
 from nipype.interfaces.io import DataSink, DataGrabber
 from nipype.interfaces.utility import Function, IdentityInterface
 import nipype.pipeline.engine as pipe
 import numpy
-import scipy
 
 from convert import *
+from writeMat import *
 ### from nodes import *  ### TODO!!!
 
 def readNrrdHeader(fileName):
@@ -118,19 +125,34 @@ def pipeline(args):
     sessions.iterables = ('session_id', sessionID)
     #--------------------------------------------------------------------------------------
     grabber = pipe.Node(interface=DataGrabber(infields=['session_id'],
-                                              outfields=['fmri_dicom_dir', 't1_file',
-                                                         'csf_file', 'wm_file']),
+                                              outfields=['fmri_dicom_dir', 't1_File', 'f1_File',
+                                                         'f2_File', 'csfFile', 'whmFile']),
                         name='dataGrabber')
     grabber.inputs.base_directory = '/paulsen'
     grabber.inputs.template = '*'
-    grabber.inputs.field_template = dict(fmri_dicom_dir='MRx/FMRI_HD_120/*/%s/%s/%s/*',
-                                         t1_file='Experiments/20120722_JOY_DWI/FMRI_HD_120/*/%s/%s/%s_*_%s_FS/mri/T1.mgz',
-                                         csf_file='Experiments/20120801.SubjectOrganized_Results/FMRI_HD_120/*/%s/%s/%s.nii.gz',
-                                         wm_file='Experiments/20120801.SubjectOrganized_Results/FMRI_HD_120/*/%s/%s/%s.nii.gz')
-    grabber.inputs.template_args = dict(fmri_dicom_dir=[['session_id', 'ANONRAW', 'FMRI_RestingStateConnectivity']],
-                                        t1_file=[['session_id', '10_AUTO.NN3Tv20110419','JOY_v51_2011', 'session_id']],
-                                        csf_file=[['session_id','ACCUMULATED_POSTERIORS', 'POSTERIOR_CSF_TOTAL']],
-                                        wm_file=[['session_id','ACCUMULATED_POSTERIORS', 'POSTERIOR_WM_TOTAL']])
+    fmriRegex = 'MRx/FMRI_HD_120/*/%s/%s/%s/*'
+    fS_Regex = 'Experiments/20120722_JOY_DWI/FMRI_HD_120/*/%s/%s/%s_*_%s_FS/%s/%s'
+    probRegex = 'Experiments/20120801.SubjectOrganized_Results/FMRI_HD_120/*/%s/%s/%s.nii.gz'
+    grabber.inputs.field_template = dict(fmri_dicom_dir=fmriRegex,
+                                         t1_File=fS_Regex,
+                                         f1_File=fS_Regex,
+                                         f2_File=fS_Regex,
+                                         csfFile=probRegex,
+                                         whmFile=probRegex)
+    grabber.inputs.template_args = dict(fmri_dicom_dir=[['session_id', 'ANONRAW',
+                                                         'FMRI_RestingStateConnectivity']],
+                                        t1_File=[['session_id', '10_AUTO.NN3Tv20110419',
+                                                  'JOY_v51_2011', 'session_id', 'mri', 'brain.mgz']],
+                                        f1_File=[['session_id', '10_AUTO.NN3Tv20110419',
+                                                  'JOY_v51_2011', 'session_id', 'mri_nifti',
+                                                  'aparc+aseg.nii.gz']],
+                                        f2_File=[['session_id', '10_AUTO.NN3Tv20110419',
+                                                  'JOY_v51_2011', 'session_id', 'mri_nifti',
+                                                  'aparc.a2009s+aseg.nii.gz']],
+                                        csfFile=[['session_id', 'ACCUMULATED_POSTERIORS',
+                                                   'POSTERIOR_CSF_TOTAL']],
+                                        whmFile=[['session_id', 'ACCUMULATED_POSTERIORS',
+                                                  'POSTERIOR_WM_TOTAL']])
     #--------------------------------------------------------------------------------------
     dicomNrrd = pipe.Node(interface=DWIconvert(), name='dicomToNrrd')
     dicomNrrd.inputs.conversionMode = 'DicomToNrrd'
@@ -189,7 +211,7 @@ def pipeline(args):
     tstat.inputs.outputtype = outputType
     tstat.inputs.args = '-mean' # TODO
     #--------------------------------------------------------------------------------------
-    calc = pipe.Node(interface=Calc(), name='afni3Dcalc')
+    calc = pipe.Node(interface=Calc(letters=['a', 'b','c']), name='afni3Dcalc')
     calc.inputs.outputtype = outputType
     calc.inputs.expr = "((a - b) + 1000) * c"
     #--------------------------------------------------------------------------------------
@@ -218,27 +240,28 @@ def pipeline(args):
     converter.inputs.in_type = 'mgz'
     converter.inputs.force_ras = True
     #--------------------------------------------------------------------------------------
-    skullstrip = pipe.Node(interface=SkullStrip(), name='afni3DskullStrip')
-    skullstrip.inputs.outputtype = outputType
+    bFit = pipe.Node(interface=BRAINSFit(), name='brainsFit')
+    bFit.inputs.initializeTransformMode = 'useCenterOfHeadAlign'
+    bFit.inputs.maskProcessingMode = 'ROIAUTO'
+    bFit.inputs.ROIAutoDilateSize = 10.0
+    bFit.inputs.useRigid = True
+    bFit.inputs.costMetric = 'MMI' # (default)
+    bFit.inputs.numberOfSamples = 100000 # (default)
+    # bFit.inputs.outputVolume = 't1_OutputVolume.nii'
     #--------------------------------------------------------------------------------------
-    allineate1 = pipe.Node(interface=Allineate(), name='afni3Dallineate1')
-    allineate1.inputs.outputtype = outputType
-    allineate1.inputs.warp = 'shift_rotate'
-    allineate1.inputs.cost = 'mutualinfo'
-    allineate1.inputs.cmass = True
-    allineate1.inputs.interp = 'triquintic'
-    allineate1.inputs.final = 'triquintic'
-    allineate1.inputs.onedmatrix_save = True
-    ### HACK
-    allineate1.inputs.out_file = 'allineate1.nii'
-    ### END HACK
+    warpT1 = pipe.MapNode(interface=ApplyTransforms(), iterfield=['input_image'],
+                          name='antsApplyTransformsT1')
+    warpT1.inputs.interpolation='NearestNeighbor'
+
+    # warpT1 = warpNN.clone('antsApplyTransformT1')
+    # warpCSF = warpNN.clone('antsApplyTransformCSF')
+    # warpWHM = warpNN.clone('antsApplyTransformWHM')
     #--------------------------------------------------------------------------------------
-    allineate2 = pipe.Node(interface=Allineate(), name='afni3Dallineate2')
-    allineate2.inputs.outputtype = outputType
-    allineate2.inputs.final = 'triquintic'
-    ### HACK
-    allineate2.inputs.out_file = 'allineate2.nii'
-    ### END HACK
+    warpFS1 = pipe.Node(interface=ApplyTransforms(), name='antsApplyTransformsFS1')
+    warpFS1.inputs.interpolation='MultiLabel'
+
+    warpFS2 = pipe.Node(interface=ApplyTransforms(), name='antsApplyTransformsFS2')
+    warpFS2.inputs.interpolation='MultiLabel'
     #--------------------------------------------------------------------------------------
     csfmask = pipe.Node(interface=Function(function=generateTissueMask,
                                            input_names=['input_file','low', 'high', 'erodeFlag'],
@@ -305,52 +328,10 @@ def pipeline(args):
     regionAvg.inputs.args = '-median -mrange 1 1' # TODO
     regionAvg.inputs.quiet = True
     #--------------------------------------------------------------------------------------
-    # # FIXED='.../ReferenceAtlas-build/Atlas/Atlas_20120830/template_t1.nii.gz'
-    # # MOVING='.../Desktop/SPL/nac-brain-atlas-1.0/volumes/A1_grayT1.nrrd'
-    # # labelImage='.../Desktop/SPL/nac-brain-atlas-1.0/volumes/A1_labels.nrrd'
-    # # output_path='.../transfer_labels'
-    # # if not os.path.exists(output_path):
-    # #     os.makedirs(output_path)
-
-    # bFit = pipe.Node(interface=BRAINSFit(), name='brainsFit')
-    # # bFit.inputs.fixedVolume=FIXED
-    # # bFit.inputs.movingVolume=MOVING
-    # bFit.inputs.initializeTransformMode='useCenterOfHeadAlign'
-    # bFit.inputs.maskProcessingMode='ROIAUTO'
-    # bFit.inputs.useRigid=True
-    # bFit.inputs.histogramMatch=True
-    # # bFit.inputs.outputVolume=os.path.join(output_path,'nac2ia.nii.gz')
-    # # bFit.inputs.outputTransform=os.path.join(output_path,'bFit_rigid.mat')
-    # #--------------------------------------------------------------------------------------
-    # warp = pipe.Node(interface=ApplyTransforms(), name='antsApplyTransforms')
-    # # warp.inputs.input_image=labelImage
-    # # warp.inputs.reference_image=FIXED
-    # warp.inputs.interpolation='MultiLabel'
-    # # warp.inputs.transforms=[os.path.join(output_path,'bf_rigid.mat')]
-    # # warp.inputs.output_image=os.path.join(output_path,'multi_label.nii.gz')
-    # #--------------------------------------------------------------------------------------
-    # reg = pipe.Node(interface=Registration(), name='antsRegistration')
-    # reg.inputs.dimension = 3
-    # # reg.inputs.fixed_image = FIXED
-    # # reg.inputs.moving_image = MOVING
-    # reg.inputs.metric = [ 'MI' ]
-    # reg.inputs.radius_or_number_of_bins = [ 32 ]
-    # reg.inputs.sampling_strategy=['Random']
-    # reg.inputs.sampling_percentage=[0.2]
-    # reg.inputs.metric_weight = [1.0]
-    # reg.inputs.convergence_threshold= [ 1e-6 ]
-    # reg.inputs.convergence_window_size = [ 10 ]
-    # reg.inputs.transforms = ['Rigid']
-    # reg.inputs.transform_parameters = [[0.1]]
-    # reg.inputs.number_of_iterations = [[4000,4000,4000] ]
-    # reg.inputs.shrink_factors = [[8,2,1]]
-    # reg.inputs.smoothing_sigmas = [[8,2,0]]
-    # reg.inputs.use_histogram_matching = [ False ]
-    # reg.inputs.write_composite_transform = True
-    # # reg.inputs.output_transform_prefix = 'NAC2IA_'
-    # # reg.inputs.output_warped_image='nac2ia.nii.gz'
-    # # reg.inputs.output_inverse_warped_image='ia2nac.nii.gz'
-    # #--------------------------------------------------------------------------------------
+    # writeFile = pipe.Node(interface=Function(function=writeMat,
+    #     input_names=['data', 'fileName', 'key']),
+    #                      name='writeMatFile')
+    #--------------------------------------------------------------------------------------
     # Connect pipeline
     if len(sessionID) > 1:
         preproc.connect(sessions, 'session_id', grabber, 'session_id')
@@ -365,8 +346,6 @@ def pipeline(args):
     preproc.connect(grep, 'volumes', to_3D_str, 'volumes')
     preproc.connect(dicom, 'repTime', to_3D_str, 'repTime')
     preproc.connect(to_3D_str, 'out_string', to_3D, 'funcparams')
-    preproc.run()
-    return 0
     preproc.connect(to_3D, 'out_file', refit, 'in_file')                  #1a
     preproc.connect(refit, 'out_file', despike, 'in_file')                #2
     preproc.connect(despike, 'out_file', volreg, 'in_file')               #3
@@ -380,32 +359,51 @@ def pipeline(args):
     preproc.connect(automask, 'out_file', calc, 'in_file_c')
     preproc.connect(calc, 'out_file', fourier, 'in_file')                 #8
     #### Freesurfer section
-    preproc.connect(grabber, 't1_file', converter, 'in_file')             #9
-    preproc.connect(converter, 'out_file', allineate1, 'base_file')
-    preproc.connect(tstat, 'out_file', allineate1, 'in_file')
-    preproc.connect(allineate1, 'onedmatrix_out', allineate2, 'onedmatrix')
-    preproc.connect(converter, 'out_file', allineate2, 'master_file')
-    preproc.connect(fourier, 'out_file', allineate2, 'in_file')
+    preproc.connect(grabber, 't1_File', converter, 'in_file')             #9
+    preproc.connect(converter, 'out_file', bFit, 'movingVolume')
+    preproc.connect(tstat, 'out_file', bFit, 'fixedVolume')
     ### preprocessing_part2.sh
-    preproc.connect(grabber, 'csf_file', csfmask, 'input_file')           #10
-    preproc.connect(csfmask, 'output_file', csfAvg, 'mask')
-    preproc.connect(allineate2, 'out_file', csfAvg, 'in_file')
-    preproc.connect(grabber, 'wm_file', wmmask, 'input_file')             #11
-    preproc.connect(wmmask, 'output_file', wmAvg, 'mask')
-    preproc.connect(allineate2, 'out_file', wmAvg, 'in_file')
-    preproc.connect(fourier, 'out_file', deconvolve, 'in_file')           #12
-    preproc.connect(csfAvg, 'out_file', deconvolve, 'stim_file_1')
-    preproc.connect(wmAvg, 'out_file', deconvolve, 'stim_file_2')
-    preproc.connect(volreg, 'oned_file', deconvolve, 'stim_file_3')
-    preproc.connect(deconvolve, 'out_errts', detrend, 'in_file')          #13
+    ### These will change to Linear later...
+    preproc.connect(bFit, 'outputTransform', warpT1, 'transforms')
+    preproc.connect(grabber, 't1_File', warpT1, 'input_image')
+    preproc.connect(tstat, 'out_file', warpT1, 'reference_image')
+
+    # preproc.connect(bFit, 'outputTransform', warpCSF, 'transforms')
+    # preproc.connect(grabber, 'csfFile', warpCSF, 'input_image')
+    # preproc.connect(tstat, 'out_file', warpCSF, 'reference_image')
+
+    # preproc.connect(bFit, 'outputTransform', warpWHM, 'transforms')
+    # preproc.connect(grabber, 'whmFile', warpWHM, 'input_image')
+    # preproc.connect(tstat, 'out_file', warpWHM, 'reference_image')
+
+    # preproc.connect(warpCSF, 'output_image', csfmask, 'input_file')       #10
+    # preproc.connect(warpWHM, 'output_image', wmmask, 'input_file')        #11
     ### TODO: Extract ROIs
     ###         1) Register labels with fMRI
+    ## Register multilabel files
+    # preproc.connect(bFit, 'outputTransform', warpFS1, 'transforms')
+    # preproc.connect(grabber, 'f1_File', warpFS1, 'input_image')
+    # preproc.connect(tstat, 'out_file', warpFS1, 'reference_image')
+
+    # preproc.connect(bFit, 'outputTransform', warpFS2, 'transforms')
+    # preproc.connect(grabber, 'f2_File', warpFS2, 'input_image')
+    # preproc.connect(tstat, 'out_file', warpFS2, 'reference_image')
+
+    # preproc.connect(csfmask, 'output_file', csfAvg, 'mask')
+    # preproc.connect(tstat, 'out_file', csfAvg, 'in_file')
+    # preproc.connect(wmmask, 'output_file', wmAvg, 'mask')
+    # preproc.connect(tstat, 'out_file', wmAvg, 'in_file')
+    # preproc.connect(fourier, 'out_file', deconvolve, 'in_file')           #12
+    # preproc.connect(csfAvg, 'out_file', deconvolve, 'stim_file_1')
+    # preproc.connect(wmAvg, 'out_file', deconvolve, 'stim_file_2')
+    # preproc.connect(volreg, 'oned_file', deconvolve, 'stim_file_3')
+    # preproc.connect(deconvolve, 'out_errts', detrend, 'in_file')          #13
     ###         2) Binary threshold label image for each label
     ###         3) Calculate the average fMRI value per label
     ###         4) Output label and average to a dictionary?
     ### TODO: create NxN matrix files
     ### TODO: DataSink
-    # preproc.write_graph()
+    preproc.write_graph()
     preproc.write_hierarchical_dotfile(dotfilename='dave.dot')
     preproc.run()
 
@@ -430,6 +428,8 @@ if __name__ == '__main__':
     os.environ['PATH'] = old_path
     os.environ['DYLD_LIBRARY_PATH'] = old_dyld
     os.environ['DYLD_FALLBACK_LIBRARY_PATH'] = old_fallback
+    sys.path.pop(3)
+    sys.path.pop(2)
     sys.path.pop(1)
     ### END HACK ###
     sys.exit(outvalue)
