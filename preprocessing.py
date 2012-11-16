@@ -20,21 +20,21 @@ try:
 except KeyError:
     old_fallback = ''
 
-os.environ['PATH'] = '/Volumes/scratch/welchdm/bld/BSA-SyNTesting/bin:' + \
+os.environ['PATH'] = '/Volumes/scratch/welchdm/bld/BSA-20121108/bin:' + \
     '/opt/afni-OSX_10.7:' + '/opt/freesurfer_v4.5.0-full/bin:' + old_path
 
-os.environ['DYLD_LIBRARY_PATH'] = '/Volumes/scratch/welchdm/bld/BSA-SyNTesting/lib:' + \
-    '/Volumes/scratch/welchdm/bld/BSA-SyNTesting/bin:' + \
+os.environ['DYLD_LIBRARY_PATH'] = '/Volumes/scratch/welchdm/bld/BSA-20121108/lib:' + \
+    '/Volumes/scratch/welchdm/bld/BSA-20121108/bin:' + \
     '/opt/freesurfer_v4.5.0-full/lib:' + old_dyld
 
 os.environ['DYLD_FALLBACK_LIBRARY_PATH'] = '/opt/afni-OSX_10.7:' + old_fallback
 
 sys.path.insert(1, '/Volumes/scratch/welchdm/src/nipype/nipype')
-sys.path.insert(2, '/Volumes/scratch/welchdm/bld/BSA-SyNTesting/SimpleITK-build/lib')
+sys.path.insert(2, '/Volumes/scratch/welchdm/bld/BSA-20121108/SimpleITK-build/lib')
 sys.path.insert(3, '/Volumes/scratch/welchdm/src/BRAINSStandAlone/AutoWorkup')
 ### END HACK ###
 
-from BRAINSTools import BRAINSFit
+from SEMTools import BRAINSFit
 from nipype.interfaces.ants.registration import Registration
 from nipype.interfaces.ants.resampling import ApplyTransforms
 from nipype.interfaces.afni.preprocess import *
@@ -45,74 +45,10 @@ import nipype.pipeline.engine as pipe
 import numpy
 
 from convert import *
+from utilities import *
 from writeMat import *
 ### from nodes import *  ### TODO!!!
 
-def readNrrdHeader(fileName):
-    """
-    Grep out the number of slices and volumes from the Nrrd file created by DWIConvert
-    """
-    import re
-    fID = open(fileName, 'r')
-    try:
-        for line in fID.readlines():
-            search = re.search('(?<=sizes:\s)(?:[0-9]*)\s(?:[0-9])*\s(?P<slices>[0-9]*)\s(?P<volumes>[0-9]*)', line)
-            if search is not None:
-                slices = search.groupdict()['slices']
-                volumes = search.groupdict()['volumes']
-                return slices, volumes
-    finally:
-        fID.close()
-    raise IOError('Nrrd file %s has regex match for slice and volume numbers!' % fileName)
-
-def strCreate(slices, volumes, repTime):
-    """ Removed FROM_IMAGE string in favor of hard-coded alt+z2 in afni.preprocess.py """
-    return "%s %s %s" % (slices, volumes, repTime)
-
-def dicomRead(infolder):
-    """
-    Use PyDicom to get the DICOM repetition time
-    """
-    import os
-    import dicom
-    infolder = os.path.abspath(infolder)
-    for ii in os.listdir(infolder):
-        meta = dicom.read_file(os.path.join(infolder, ii))
-        if "RepetitionTime" in meta:
-            return meta.data_element('RepetitionTime').value
-    raise Exception('None of the dicom files in %s contain \
-                     "Repetition Time" where PyDicom can find it!' % infolder)
-
-def generateTissueMask(input_file, low=0.0, high=1.0, erodeFlag=True):
-    """
-    Using posterior tissue probability file, threshold by
-    a low and/or high value, erode by 2mm, and take the ceil()
-    Return the result as a binary mask file
-    """
-    import os
-    import SimpleITK as sitk
-    reader = sitk.ImageFileReader()
-    reader.SetFileName(input_file)
-    image = reader.Execute()
-    ## Compute brain mask
-    binaryMask = sitk.BinaryThreshold(image, low, high, 1, 0)
-    if erodeFlag:
-        fileName = 'whiteMatterMask.nii'
-        radiusMM = 1
-        kernel = sitk.BinaryErodeImageFilter()
-        kernel.SetKernelType(kernel.Ball)
-        kernel.SetKernelRadius(radiusMM)
-        erodedMask = sitk.ErodeObjectMorphology(binaryMask, kernel.GetKernelType())
-        connected = sitk.ConnectedComponent(erodedMask)
-    else:
-        fileName = 'csfMask.nii'
-        connected = sitk.ConnectedComponent(binaryMask)
-    relabeled = sitk.RelabelComponent(connected)
-    maskOnly = sitk.BinaryThreshold(relabeled, 1.0, 1.0, 1, 0)
-    writer = sitk.ImageFileWriter()
-    writer.SetFileName(os.path.join(os.getcwd(), fileName))
-    writer.Execute(maskOnly)
-    return writer.GetFileName()
 
 def pipeline(args):
     sessionID = args.sessionID
@@ -239,6 +175,10 @@ def pipeline(args):
     converter.inputs.out_type = fOutputType
     converter.inputs.in_type = 'mgz'
     converter.inputs.force_ras = True
+
+    convertT1 = converter.clone('T1Converter')
+    convertF1 = converter.clone('F1Converter')
+    convertF2 = converter.clone('F2Converter')
     #--------------------------------------------------------------------------------------
     bFit = pipe.Node(interface=BRAINSFit(), name='brainsFit')
     bFit.inputs.initializeTransformMode = 'useCenterOfHeadAlign'
@@ -247,15 +187,15 @@ def pipeline(args):
     bFit.inputs.useRigid = True
     bFit.inputs.costMetric = 'MMI' # (default)
     bFit.inputs.numberOfSamples = 100000 # (default)
-    # bFit.inputs.outputVolume = 't1_OutputVolume.nii'
+    bFit.inputs.outputTransform = True
     #--------------------------------------------------------------------------------------
     warpT1 = pipe.MapNode(interface=ApplyTransforms(), iterfield=['input_image'],
                           name='antsApplyTransformsT1')
     warpT1.inputs.interpolation='NearestNeighbor'
 
     # warpT1 = warpNN.clone('antsApplyTransformT1')
-    # warpCSF = warpNN.clone('antsApplyTransformCSF')
-    # warpWHM = warpNN.clone('antsApplyTransformWHM')
+    warpCSF = warpT1.clone('antsApplyTransformCSF')
+    warpWHM = warpT1.clone('antsApplyTransformWHM')
     #--------------------------------------------------------------------------------------
     warpFS1 = pipe.Node(interface=ApplyTransforms(), name='antsApplyTransformsFS1')
     warpFS1.inputs.interpolation='MultiLabel'
@@ -276,17 +216,17 @@ def pipeline(args):
                                            output_names=['output_file']),
                         name='wmMask')
     wmmask.inputs.low = 0.99
-    wmmask.inputs.low = 1.0
+    wmmask.inputs.high = 1.0
     wmmask.inputs.erodeFlag = True
     #--------------------------------------------------------------------------------------
     csfAvg = pipe.Node(interface=Maskave(), name='afni3DmaskAve_csf')
     csfAvg.inputs.outputtype = outputType
-    csfAvg.inputs.args = '-median -mrange 1 1' # TODO
+    csfAvg.inputs.args = '-median' # TODO
     csfAvg.inputs.quiet = True
     #--------------------------------------------------------------------------------------
     wmAvg = pipe.Node(interface=Maskave(), name='afni3DmaskAve_wm')
     wmAvg.inputs.outputtype = outputType
-    wmAvg.inputs.args = '-median -mrange 1 2' # TODO
+    wmAvg.inputs.args = '-median' # TODO
     wmAvg.inputs.quiet = True
     #--------------------------------------------------------------------------------------
     deconvolve = pipe.Node(interface=Deconvolve(fileCount=3, seriesCount=8), name='afni3Ddeconvolve')
@@ -323,9 +263,10 @@ def pipeline(args):
     detrend.inputs.out_file = 'errts_Decon_dt+tlrc'
     detrend.inputs.args = '-polort 3' # TODO
     #--------------------------------------------------------------------------------------
+    # TODO: Iterate over this node using the args = '-median -mrange %d %d' function...
     regionAvg = pipe.Node(interface=Maskave(), name='afni3DmaskAve_region')
     regionAvg.inputs.outputtype = outputType
-    regionAvg.inputs.args = '-median -mrange 1 1' # TODO
+    regionAvg.inputs.args = '-median' # TODO
     regionAvg.inputs.quiet = True
     #--------------------------------------------------------------------------------------
     # writeFile = pipe.Node(interface=Function(function=writeMat,
@@ -359,45 +300,43 @@ def pipeline(args):
     preproc.connect(automask, 'out_file', calc, 'in_file_c')
     preproc.connect(calc, 'out_file', fourier, 'in_file')                 #8
     #### Freesurfer section
-    preproc.connect(grabber, 't1_File', converter, 'in_file')             #9
-    preproc.connect(converter, 'out_file', bFit, 'movingVolume')
+    preproc.connect(grabber, 't1_File', convertT1, 'in_file')             #9
+    preproc.connect(convertT1, 'out_file', bFit, 'movingVolume')
     preproc.connect(tstat, 'out_file', bFit, 'fixedVolume')
     ### preprocessing_part2.sh
     ### These will change to Linear later...
-    preproc.connect(bFit, 'outputTransform', warpT1, 'transforms')
-    preproc.connect(grabber, 't1_File', warpT1, 'input_image')
+    preproc.connect([(bFit, warpT1, [(('outputTransform', makeList), 'transforms')])])
+    preproc.connect(convertT1, 'out_file', warpT1, 'input_image') # connected to brain.nii NOT brain.mgz
     preproc.connect(tstat, 'out_file', warpT1, 'reference_image')
 
-    # preproc.connect(bFit, 'outputTransform', warpCSF, 'transforms')
-    # preproc.connect(grabber, 'csfFile', warpCSF, 'input_image')
-    # preproc.connect(tstat, 'out_file', warpCSF, 'reference_image')
+    preproc.connect([(bFit, warpCSF, [(('outputTransform', makeList), 'transforms')])])
+    preproc.connect(grabber, 'csfFile', warpCSF, 'input_image')
+    preproc.connect(tstat, 'out_file', warpCSF, 'reference_image')
+    preproc.connect([(bFit, warpWHM, [(('outputTransform', makeList), 'transforms')])])
+    preproc.connect(grabber, 'whmFile', warpWHM, 'input_image')
+    preproc.connect(tstat, 'out_file', warpWHM, 'reference_image')
 
-    # preproc.connect(bFit, 'outputTransform', warpWHM, 'transforms')
-    # preproc.connect(grabber, 'whmFile', warpWHM, 'input_image')
-    # preproc.connect(tstat, 'out_file', warpWHM, 'reference_image')
-
-    # preproc.connect(warpCSF, 'output_image', csfmask, 'input_file')       #10
-    # preproc.connect(warpWHM, 'output_image', wmmask, 'input_file')        #11
+    preproc.connect(warpCSF, 'output_image', csfmask, 'input_file')       #10
+    preproc.connect(warpWHM, 'output_image', wmmask, 'input_file')        #11
     ### TODO: Extract ROIs
     ###         1) Register labels with fMRI
     ## Register multilabel files
-    # preproc.connect(bFit, 'outputTransform', warpFS1, 'transforms')
-    # preproc.connect(grabber, 'f1_File', warpFS1, 'input_image')
-    # preproc.connect(tstat, 'out_file', warpFS1, 'reference_image')
+    preproc.connect([(bFit, warpFS1, [(('outputTransform', makeList), 'transforms')])])
+    preproc.connect(grabber, 'f1_File', warpFS1, 'input_image')
+    preproc.connect(tstat, 'out_file', warpFS1, 'reference_image')
+    preproc.connect([(bFit, warpFS2, [(('outputTransform', makeList), 'transforms')])])
+    preproc.connect(grabber, 'f2_File', warpFS2, 'input_image')
+    preproc.connect(tstat, 'out_file', warpFS2, 'reference_image')
 
-    # preproc.connect(bFit, 'outputTransform', warpFS2, 'transforms')
-    # preproc.connect(grabber, 'f2_File', warpFS2, 'input_image')
-    # preproc.connect(tstat, 'out_file', warpFS2, 'reference_image')
-
-    # preproc.connect(csfmask, 'output_file', csfAvg, 'mask')
-    # preproc.connect(tstat, 'out_file', csfAvg, 'in_file')
-    # preproc.connect(wmmask, 'output_file', wmAvg, 'mask')
-    # preproc.connect(tstat, 'out_file', wmAvg, 'in_file')
-    # preproc.connect(fourier, 'out_file', deconvolve, 'in_file')           #12
-    # preproc.connect(csfAvg, 'out_file', deconvolve, 'stim_file_1')
-    # preproc.connect(wmAvg, 'out_file', deconvolve, 'stim_file_2')
-    # preproc.connect(volreg, 'oned_file', deconvolve, 'stim_file_3')
-    # preproc.connect(deconvolve, 'out_errts', detrend, 'in_file')          #13
+    preproc.connect(csfmask, 'output_file', csfAvg, 'mask')
+    preproc.connect(tstat, 'out_file', csfAvg, 'in_file')
+    preproc.connect(wmmask, 'output_file', wmAvg, 'mask')
+    preproc.connect(tstat, 'out_file', wmAvg, 'in_file')
+    preproc.connect(fourier, 'out_file', deconvolve, 'in_file')           #12
+    preproc.connect(csfAvg, 'out_file', deconvolve, 'stim_file_1')
+    preproc.connect(wmAvg, 'out_file', deconvolve, 'stim_file_2')
+    preproc.connect(volreg, 'oned_file', deconvolve, 'stim_file_3')
+    preproc.connect(deconvolve, 'out_errts', detrend, 'in_file')          #13
     ###         2) Binary threshold label image for each label
     ###         3) Calculate the average fMRI value per label
     ###         4) Output label and average to a dictionary?
