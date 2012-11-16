@@ -58,27 +58,40 @@ def generateTissueMask(input_file, low=0.0, high=1.0, erodeFlag=True):
     import os
     import SimpleITK as sitk
     assert (isinstance(input_file[0], str)), input_file
-    image = sitk.ReadImage(input_file[0])
+    image = sitk.ReadImage(input_file)
     ## Compute brain mask
     inValue = 1
     outValue = 0
-    binaryMask = sitk.BinaryThreshold(image, low, high, inValue, outValue)
+    binaryMask = sitk.BinaryThreshold(image, low, high)
     if erodeFlag:
         fileName = 'whiteMatterMask.nii'
         radiusMM = 1
         erodedMask = sitk.BinaryErode(binaryMask, radiusMM)
         sitk.WriteImage(erodedMask, os.path.abspath('eroded_' + fileName))
         connected = sitk.ConnectedComponent(erodedMask)
-        sortedComp = sitk.RelabelComponent(connected)
-        maskOnly = sitk.BinaryThreshold(sortedComp, 0.99, 1.0, inValue, outValue)
+        sortedComp = sitk.RelabelComponent(connected, 10) # HACK
+        maskOnly = sitk.BinaryThreshold(sortedComp, 1, 1)
     else:
         fileName = 'csfMask.nii'
         connected = sitk.ConnectedComponent(binaryMask)
         sortedComp = sitk.RelabelComponent(connected)
         #        maskOnly = sitk.BinaryThreshold(sortedComp, 0.0, 1.0, inValue, outValue)
-        maskOnly = sitk.BinaryThreshold(sortedComp, 0.99, 1.0, inValue, outValue)
+        maskOnly = sitk.BinaryThreshold(sortedComp, 2.0, 2.0)
     sitk.WriteImage(binaryMask, os.path.abspath('binary_' + fileName))
     sitk.WriteImage(connected, os.path.abspath('connected_' + fileName))
     sitk.WriteImage(sortedComp, os.path.abspath('sorted_' + fileName))
-    sitk.WriteImage(maskOnly, os.path.abspath(fileName))
-    return os.path.abspath(fileName)
+    sitk.WriteImage(maskOnly, os.path.abspath('final_' + fileName))
+    return os.path.abspath('final_' + fileName)
+
+def getLabelList(label_file, arg_template):
+    import os
+    import SimpleITK as sitk
+    assert os.path.exists(label_file)
+    label = sitk.ReadImage(label_file)
+    labelStat = sitk.LabelStatisticsImageFilter()
+    labelStat.Execute(label, sitk.Cast(label, sitk.sitkUInt32))
+    labelList = labelStat.GetValidLabels()
+    arg_str = []
+    for labelCode in range(len(labelList)):
+        arg_str.append(arg_template.format(labelCode))
+    return arg_str, labelList
