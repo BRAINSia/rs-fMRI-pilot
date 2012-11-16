@@ -230,7 +230,7 @@ def pipeline(args):
     wmAvg.inputs.quiet = True
     #--------------------------------------------------------------------------------------
     deconvolve = pipe.Node(interface=Deconvolve(fileCount=3, seriesCount=8), name='afni3Ddeconvolve')
-    deconvolve.inputs.outputtype = outputType
+    deconvolve.inputs.outputtype = 'AFNI'
     deconvolve.inputs.ignoreWarnings = 4
     deconvolve.inputs.nullHypothesisPolynomialDegree = 1
     deconvolve.inputs.full_first = True
@@ -259,7 +259,7 @@ def pipeline(args):
     deconvolve.inputs.is_stim_base_8 = True
     #--------------------------------------------------------------------------------------
     detrend = pipe.Node(interface=Detrend(), name='afni3Ddetrend')
-    detrend.inputs.outputtype = outputType
+    detrend.inputs.outputtype = 'AFNI'
     detrend.inputs.out_file = 'errts_Decon_dt+tlrc'
     detrend.inputs.args = '-polort 3' # TODO
     #--------------------------------------------------------------------------------------
