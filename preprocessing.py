@@ -210,6 +210,7 @@ def pipeline(args):
     converter.inputs.out_type = fOutputType
     converter.inputs.in_type = 'mgz'
     converter.inputs.force_ras = True
+    converter.inputs.out_datatype = 'short'
 
     convertT1 = converter.clone('T1Converter')
     preproc.connect(grabber, 't1_File', convertT1, 'in_file')
