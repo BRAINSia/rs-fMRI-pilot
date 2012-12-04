@@ -187,15 +187,18 @@ def writeMat(out_file, fileNames, volumeCount, skippedVolCount):
     import os
     import numpy as np
     from scipy.io import savemat
-    columns = len(fileNames)
-    rows = volumeCount - skippedVolCount
+    rowss = len(fileNames)
+    columns = int(volumeCount) - skippedVolCount # - 4 ## HACK: "- 4""
     data = np.array(np.empty((rows, columns)), ndmin=2)
     index = 0
     for fileName in fileNames:
         with open(fileName, 'r') as fID:
             valueStr = fID.readlines()
-            temp = [float(item.rstrip('\n')) for item in valueStr]
-            np.put(data, index, np.array(temp, ndmin=2))
+            temp = [item.rstrip('\n') for item in valueStr]
+            np.put(data, range(index, index + columns), temp)
+            for ii in range(len(temp)):
+                assert float(temp[ii]) == data.flat[index+ii], \
+                  "Not equal!, Index %d, temp %f, data %f" % (ii, float(temp[ii]), data.flat[index+ii])
             index += columns
     covar = np.cov(data)
     corr = np.corrcoef(data)
