@@ -135,9 +135,10 @@ def pipeline(args):
     preproc.connect(to_3D, 'out_file', refit, 'in_file')                  #1a
 
     #2
+    skipCount = 4
     despike = pipe.Node(interface=Despike(), name='afni3Ddespike')
     despike.inputs.outputtype = outputType
-    despike.inputs.ignore = 4
+    ### TODO: despike.inputs.volumerange = [4..]
     preproc.connect(refit, 'out_file', despike, 'in_file')                #2
 
     #3
@@ -365,11 +366,12 @@ def pipeline(args):
 
     ###         4) Output label covariance matrix to a file
     writeFile = pipe.Node(interface=Function(function=writeMat,
-                                             input_names=['out_file', 'labelList', 'fileNames'],
+                                             input_names=['out_file', 'fileNames', 'volumeCount', 'skippedVolCount'],
                                              output_names=['fileName']),
                           name='writeMatFile')
+    writeFile.inputs.skippedVolCount = 0 # skipCount
     writeFile.inputs.out_file = 'regionCovariance1.mat'
-    preproc.connect(fsLabels, 'labelList', writeFile, 'labelList')
+    preproc.connect(grep, 'volumes', writeFile, 'volumeCount')
     preproc.connect(regionAvg, 'out_file', writeFile, 'fileNames')
     ### TODO: DataSink
 
