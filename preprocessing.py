@@ -47,8 +47,6 @@ import numpy
 
 from convert import *
 from utilities import *
-from writeMat import *
-### from nodes import *  ### TODO!!!
 
 def pipeline(args):
     sessionID = args.sessionID
@@ -138,7 +136,10 @@ def pipeline(args):
     skipCount = 4
     despike = pipe.Node(interface=Despike(), name='afni3Ddespike')
     despike.inputs.outputtype = outputType
-    ### TODO: despike.inputs.volumerange = [4..]
+    despike.inputs.include_volumes = '[4..]'
+    # Since we want to remove the first four from the output,
+    # we should ignore them for the despike analysis, right?
+    despike.inputs.ignore = 4
     preproc.connect(refit, 'out_file', despike, 'in_file')                #2
 
     #3
@@ -373,7 +374,7 @@ def pipeline(args):
     writeFile.inputs.out_file = 'regionCovariance1.mat'
     preproc.connect(grep, 'volumes', writeFile, 'volumeCount')
     preproc.connect(regionAvg, 'out_file', writeFile, 'fileNames')
-    ### TODO: DataSink
+    ###TODO: DataSink
 
     preproc.write_graph()
     preproc.write_hierarchical_dotfile(dotfilename='dave.dot')
