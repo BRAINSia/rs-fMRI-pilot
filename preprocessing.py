@@ -371,7 +371,7 @@ def pipeline(args):
                                              output_names=['fileName']),
                           name='writeMatFile')
     writeFile.inputs.skippedVolCount = 0 # skipCount
-    writeFile.inputs.out_file = 'regionCovariance1.mat'
+    writeFile.inputs.out_file = 'regionCorrelation.mat'
     preproc.connect(grep, 'volumes', writeFile, 'volumeCount')
     preproc.connect(regionAvg, 'out_file', writeFile, 'fileNames')
     ###TODO: DataSink
