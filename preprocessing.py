@@ -136,10 +136,10 @@ def pipeline(args):
     skipCount = 4
     despike = pipe.Node(interface=Despike(), name='afni3Ddespike')
     despike.inputs.outputtype = outputType
-    despike.inputs.include_volumes = '[4..]'
+    despike.inputs.include_volumes = '[%d..]' % skipCount
     # Since we want to remove the first four from the output,
     # we should ignore them for the despike analysis, right?
-    despike.inputs.ignore = 4
+    despike.inputs.ignore = skipCount
     preproc.connect(refit, 'out_file', despike, 'in_file')                #2
 
     #3
@@ -342,38 +342,29 @@ def pipeline(args):
     detrend.inputs.args = '-polort 3' # TODO
     preproc.connect(deconvolve, 'out_errts', detrend, 'in_file')          #13
 
-    # mergeLabels = pipe.Node(interface=Merger(2),
-    #                            name='FreesurferLabelMerger')
-    # preproc.connect(warpFS1, 'output_image', mergeLabels, 'in1')
-    # preproc.connect(warpFS2, 'output_image', mergeLabels, 'in2')
-
-    fsLabels = pipe.Node(interface=Function(function=getLabelList,
-                                            input_names=['label_file', 'arg_template'],
-                                            output_names=['arg_str', 'labelList']),
-                         name='FreesurferLabels')
-    fsLabels.inputs.arg_template = "-median -mrange {0} {0}"
-    preproc.connect(warpFS1, 'output_image', fsLabels, 'label_file')
-    # preproc.connect(mergeLabels, 'out', fsLabels, 'label_file')
-
     ###        2) Binary threshold label image for each label
     ###        3) Calculate the average fMRI value per label
-    regionAvg = pipe.MapNode(interface=Maskave(), iterfield=['args'], name='afni3DmaskAve_region')
-    regionAvg.inputs.outputtype = 'AFNI_1D' #outputType
-    regionAvg.inputs.quiet = True
-    preproc.connect(warpFS1, 'output_image', regionAvg, 'mask')
-    # preproc.connect(mergeLabels, 'out', regionAvg, 'mask')
-    preproc.connect(fsLabels, 'arg_str', regionAvg, 'args')
-    preproc.connect(detrend, 'out_file', regionAvg, 'in_file')
+    roiStats1 = pipe.Node(interface=ROIStats(), name='afni3DroiStats1')
+    roiStats1.inputs.outputtype = 'AFNI_1D'
+    roiStats1.inputs.args = '-nzmedian -nomeanout'
+    preproc.connect(warpFS1, 'output_image', roiStats1, 'mask')
+    preproc.connect(detrend, 'out_file', roiStats1, 'in_file')
+
+    roiStats2 = roiStats1.clone(name='afni3DroiStats2')
+    preproc.connect(warpFS2, 'output_image', roiStats2, 'mask')
+    preproc.connect(detrend, 'out_file', roiStats2, 'in_file')
 
     ###         4) Output label covariance matrix to a file
-    writeFile = pipe.Node(interface=Function(function=writeMat,
-                                             input_names=['out_file', 'fileNames', 'volumeCount', 'skippedVolCount'],
-                                             output_names=['fileName']),
-                          name='writeMatFile')
-    writeFile.inputs.skippedVolCount = 0 # skipCount
-    writeFile.inputs.out_file = 'regionCorrelation.mat'
-    preproc.connect(grep, 'volumes', writeFile, 'volumeCount')
-    preproc.connect(regionAvg, 'out_file', writeFile, 'fileNames')
+    writeFile1 = pipe.Node(interface=Function(function=writeMat,
+                                              input_names=['in_file'],
+                                              output_names=['fileName1']),
+                           name='writeMatFile1')
+    preproc.connect(roiStats1, 'stats', writeFile1, 'in_file')
+
+    writeFile2 = writeFile1.clone(name='writeMatFile2')
+    writeFile2.interface.output_names=['fileName2']
+    preproc.connect(roiStats2, 'stats', writeFile2, 'in_file')
+
     ###TODO: DataSink
 
     preproc.write_graph()

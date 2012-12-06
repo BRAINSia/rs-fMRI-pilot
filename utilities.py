@@ -178,45 +178,37 @@ def getLabelList(label_file, arg_template):
 #     frow, fcolumn =  data.shape
 #     covar = np.cov(data)
 
-def writeMat(out_file, fileNames, volumeCount, skippedVolCount):
+def writeMat(in_file):
     """
-    Pass an array of data to be written to a .mat file
+    Pass output of afni.preprocess.ROIStat() to be written as .mat file
+
+    Nota bene: ROIStats() should only output ONE AND ONLY ONE
     Based on code on Stackflow:
            (http://stackoverflow.com/questions/1095265/matrix-from-python-to-matlab)
     """
     import os
     import numpy as np
     from scipy.io import savemat
-    rows = len(fileNames)
-    columns = int(volumeCount) - skippedVolCount # - 4 ## HACK: "- 4""
-    data = np.array(np.empty((rows, columns)), ndmin=2)
-    index = 0
-    for fileName in fileNames:
-        with open(fileName, 'r') as fID:
-            valueStr = fID.readlines()
-            temp = [item.rstrip('\n') for item in valueStr]
-            np.put(data, range(index, index + columns), temp)
-            for ii in range(len(temp)):
-                assert float(temp[ii]) == data.flat[index+ii], \
-                  "Not equal!, Index %d, temp %f, data %f" % (ii, float(temp[ii]), data.flat[index+ii])
-            index += columns
-    # covar = np.cov(data.T)
-    corr = np.corrcoef(data.T)
-    if out_file[-4:] == '.mat':
-        out_file = out_file[:-4]
-    fileName = os.path.abspath(out_file)
-    valid_labels = [2, 4, 5, 7, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 24, 26, 28, 30, 31, 41, 43, 44, 46, 47, 49, 50, 51, 52,
-                    53, 54, 58, 60, 62, 63, 77, 85, 251, 252, 253, 254, 255, 1000, 1001, 1002, 1003, 1005, 1006, 1007, 1008,
-                    1009, 1010, 1011, 1012, 1013, 1014, 1015, 1016, 1017, 1018, 1019, 1020, 1021, 1022, 1023, 1024, 1025, 1026,
-                    1027, 1028, 1029, 1030, 1031, 1032, 1033, 1034, 1035, 2000, 2001, 2002, 2003, 2005, 2006, 2007, 2008, 2009,
-                    2010, 2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025, 2026, 2027,
-                    2028, 2029, 2030, 2031, 2032, 2033, 2034, 2035]
-    # for fname in [fileName]:
-        # if isinstance(corr, dict):
-        #     savemat(file_name=fname, mdict=corr, appendmat=True, oned_as='row')
-    savemat(file_name=fileName, mdict={'data':corr}, appendmat=True, oned_as='row')
-    savemat(file_name='raw_values', mdict={'data':data}, appendmat=True, oned_as='row')
-    savemat(file_name='validLabels', mdict={'data':valid_labels}, appendmat=True, oned_as='row')
-
-    fileName = fileName + '.mat'
-    return fileName
+    with open(in_file, 'r') as fID:
+        count = 0
+        timepoint = []
+        row_data = []
+        for valueStr in fID.readlines():
+            value_list = valueStr.split()
+            if count == 0:
+                column_header = value_list[2:]
+                valid_labels = [item.strip('NZMed_') for item in column_header]
+                columns = len(column_header)
+            else:
+                timepoint.append(value_list[1].split('[')[0])
+                row_data.append(value_list[2:])
+            count += 1
+        rows = len(timepoint)
+        data = np.array(row_data, dtype='float', ndmin=2)
+        labels = np.array(valid_labels, dtype='int', ndmin=1)
+    corr = np.corrcoef(data)
+    temp, _ = os.path.basename(in_file).split('.')
+    savemat(file_name=temp + '_corr', mdict={'data':corr}, appendmat=True, oned_as='row')
+    savemat(file_name=temp + '_labels', mdict={'data':labels}, appendmat=True, oned_as='row')
+    savemat(file_name=temp + '_raw', mdict={'data':data}, appendmat=True, oned_as='row')
+    return temp + '_corr.mat'
