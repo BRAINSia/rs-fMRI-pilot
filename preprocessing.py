@@ -130,17 +130,21 @@ def pipeline(args):
     refit = pipe.Node(interface=Refit(), name='afni3Drefit')
     refit.inputs.outputtype = 'AFNI'
     refit.inputs.deoblique = True
-    preproc.connect(to_3D, 'out_file', refit, 'in_file')                  #1a
+    preproc.connect(to_3D, 'out_file', refit, 'in_file')
 
     #2
     skipCount = 4
+    def strToIntMinusOne(string):
+        return int(string) - 1
+
     despike = pipe.Node(interface=Despike(), name='afni3Ddespike')
     despike.inputs.outputtype = outputType
-    despike.inputs.include_volumes = '[%d..]' % skipCount
     # Since we want to remove the first four from the output,
     # we should ignore them for the despike analysis, right?
+    despike.inputs.start = skipCount
     despike.inputs.ignore = skipCount
-    preproc.connect(refit, 'out_file', despike, 'in_file')                #2
+    preproc.connect(refit, 'out_file', despike, 'in_file')
+    preproc.connect(grep, ('volumes', strToIntMinusOne), despike, 'end')
 
     #3
     volreg = pipe.Node(interface=Volreg(), name='afni3DvolReg')
