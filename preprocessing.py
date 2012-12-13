@@ -370,6 +370,11 @@ def pipeline(args):
     preproc.connect(roiStats2, 'stats', writeFile2, 'in_file')
 
     ###TODO: DataSink
+    sinker = pipe.Node(interface=DataSink(), name="rsDataSink")
+    sinker.inputs.base_directory = os.getcwd()
+    sinker.inputs.container = 'Results'
+    find_pattern = '(?<prefix>[a-zA-Z3]*)_(?<matrix>[a-z]*)\.mat'
+    sinker.inputs.regexp_substitutions = [('_smoother[\d]*/', '')]
 
     preproc.write_graph()
     preproc.write_hierarchical_dotfile(dotfilename='dave.dot')

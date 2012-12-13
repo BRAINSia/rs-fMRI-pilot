@@ -98,86 +98,6 @@ def getLabelList(label_file, arg_template):
             arg_str.append(arg_template.format(labelCode))
     return arg_str, labelList
 
-# def getCovarianceMatrix(fmri_file, label_file):
-#     """
-#     Read in a 4D nifti file and a Freesurfer label file and compute the median value
-#     for all regions in all volumes and compute the covariance matrix for those values
-#     """
-#     import SimpleITK as sitk
-#     def seperate_volumes(filename):
-#         """
-#         Write the seperate volumes of a 4D (3D + time) file and return a list of the filenames
-#         """
-#         from nibabel import nifti1 as nifti
-#         import numpy as np
-#         import os.path
-#         assert isinstance(index, int)
-#         image = nifti.load(filename)
-#         fourD = image.get_data()
-#         fileList = []
-#         for index in range(len(fourD[...,:])):
-#             header = image.get_header()
-#             affine = header.get_best_affine()
-#             threeD = fourD[...,index]
-#             newVolume = nifti.Nifti1Image(data=threeD, affine=affine, header=header)
-#             newVolume.update_header()
-#             newFile = 'threeD_%d.nii' % index
-#             newVolume.set_filename(newFile)
-#             newVolume.to_files()
-#             assert os.path.exists(os.path.abspath(newFile))
-#             fileList.append(os.path.abspath(newFile))
-#         return fileList
-#     def writeMat(out_file, labelList, fileNames):
-#         """
-#         Pass an array of data to be written to a .mat file
-#         Based on code on Stackflow:
-#                (http://stackoverflow.com/questions/1095265/matrix-from-python-to-matlab)
-#         """
-#         import os
-#         import numpy as np
-#         from scipy.io import savemat
-#         columns = len(labelList)
-#         rows = len(fileNames)
-#         data = np.array(np.empty((rows, columns)), ndmin=2)
-#         index = 0
-#         for fileName in fileNames:
-#             with open(fileName, 'r') as fID:
-#                 valueStr = fID.readlines()
-#                 temp = [float(item.rstrip('\n')) for item in valueStr]
-#                 np.put(data, index, np.array(temp, ndmin=2))
-#                 index += columns
-#         covar = np.cov(data)
-#         if out_file[-4:] == '.mat':
-#             out_file = out_file[:-4]
-#         fileName = os.path.abspath(out_file)
-#         for fname in [fileName, fileName + 'labels']:
-#             if isinstance(covar, dict):
-#                 savemat(file_name=fname, mdict=covar, appendmat=True, oned_as='row')
-#             savemat(file_name=fname, mdict={'data':covar}, appendmat=True, oned_as='row')
-#         fileName = fileName + '.mat'
-#         return fileName
-#     label = sitk.Cast(sitk.ReadImage(label_file), sitk.sitkUInt16)
-#     labelStat = sitk.LabelStatisticsImageFilter()
-#     volArray = [[]]
-#     for volFile in seperate_volumes(fmri_file):
-#         newVol = sitk.ReadImage(volFile)
-#         newVol.GetPixelIDTypeAsString()
-#         labelStat.Execute(newVol, label)
-#         labelList = []
-#         for lb in labelStat.GetValidLabels():
-#             labelList.append(labelStat.GetMedian(lb))
-#         volArray.append(labelList)
-#     import numpy as np
-#     rows =
-#     columns = len(labelList)
-#     data = np.array(np.empty((rows, columns)), ndmin=2)
-#     index = 0
-#     for row in range(rows):
-#         numpy.put( data, index, np.array(labelList, ndmin=2))
-#         index += columns
-#     frow, fcolumn =  data.shape
-#     covar = np.cov(data)
-
 def writeMat(in_file):
     """
     Pass output of afni.preprocess.ROIStat() to be written as .mat file
@@ -212,3 +132,10 @@ def writeMat(in_file):
     savemat(file_name=temp + '_labels', mdict={'data':labels}, appendmat=True, oned_as='row')
     savemat(file_name=temp + '_raw', mdict={'data':data}, appendmat=True, oned_as='row')
     return temp + '_corr.mat'
+
+def generateMatSubstitution(in_file, session):
+    import os.path
+    oldString = os.path.basename(in_file)
+    replaceString = "{session}_{suffix}".format(session=session,
+                                                suffix=oldString.split('roiStat_')[1])
+    return [(oldString, replaceString)]
