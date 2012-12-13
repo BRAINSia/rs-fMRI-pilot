@@ -65,7 +65,7 @@ def pipeline(args):
                                                          'f1_File', 'f2_File',
                                                          'fsLabels', 'csfFile',
                                                          'whmFile']), name='dataGrabber')
-    grabber.iterables = ('fs_prefix', ['aparc', 'aparc.a2009'])
+    grabber.iterables = ('fs_prefix', ['aparc', 'aparc.a2009s'])
     grabber.inputs.base_directory = '/paulsen'
     grabber.inputs.template = '*'
     fmriRegex = 'MRx/FMRI_HD_120/*/%s/%s/%s/*'
