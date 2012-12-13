@@ -45,7 +45,7 @@ from nipype.interfaces.utility import Merge as Merger
 import nipype.pipeline.engine as pipe
 import numpy
 
-from convert import *
+import convert
 from utilities import *
 
 def pipeline(args):
@@ -53,7 +53,7 @@ def pipeline(args):
     outputType = args.outputType
     fOutputType = args.fOutputType
     print args.name
-    preproc = pipe.Workflow(name="workflow_" + args.name)
+    preproc = pipe.Workflow(updatehash=True, name="workflow_" + args.name)
     preproc.base_dir = os.getcwd()
 
     ## preprocessing_Nov1_update.sh
@@ -89,14 +89,14 @@ def pipeline(args):
                                                    'POSTERIOR_CSF_TOTAL.nii.gz']],
                                         whmFile=[['session_id', 'ACCUMULATED_POSTERIORS',
                                                   'POSTERIOR_WM_TOTAL.nii.gz']])
-    if len(sessionID) > 1:
-        preproc.connect(sessions, 'session_id', grabber, 'session_id')
-    else:
-        grabber.inputs.session_id = sessionID[0]
+    # if len(sessionID) > 1:
+    preproc.connect(sessions, 'session_id', grabber, 'session_id')
+    # else:
+    #     grabber.inputs.session_id = sessionID[0]
 
-    dicomNrrd = pipe.Node(interface=DWIconvert(), name='dicomToNrrd')
+    dicomNrrd = pipe.Node(interface=convert.DWIconvert(), name='dicomToNrrd')
     dicomNrrd.inputs.conversionMode = 'DicomToNrrd'
-    dicomNrrd.inputs.outputVolume = 'converted.nrrd'
+    dicomNrrd.inputs.outputDirectory = '.'  # Cache directory
     preproc.connect(grabber, 'fmri_dicom_dir', dicomNrrd, 'inputDicomDirectory')
 
     grep = pipe.Node(interface=Function(function=readNrrdHeader,
