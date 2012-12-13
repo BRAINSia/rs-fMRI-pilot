@@ -60,17 +60,21 @@ def pipeline(args):
     sessions = pipe.Node(interface=IdentityInterface(fields=['session_id']), name='sessionIDs')
     sessions.iterables = ('session_id', sessionID)
 
-    grabber = pipe.Node(interface=DataGrabber(infields=['session_id'],
+    grabber = pipe.Node(interface=DataGrabber(infields=['session_id', 'fs_prefix'],
                                               outfields=['fmri_dicom_dir', 't1_File',
-                                                         'f1_File', 'f2_File', 'csfFile',
+                                                         'f1_File', 'f2_File',
+                                                         'fsLabels', 'csfFile',
                                                          'whmFile']), name='dataGrabber')
+    grabber.iterables = ('fs_prefix', ['aparc', 'aparc.a2009'])
     grabber.inputs.base_directory = '/paulsen'
     grabber.inputs.template = '*'
     fmriRegex = 'MRx/FMRI_HD_120/*/%s/%s/%s/*'
     fS_Regex = 'Experiments/20120722_JOY_DWI/FMRI_HD_120/*/%s/%s/%s_*_%s_FS/%s/%s'
+    fS_LabelRegex = 'Experiments/20120722_JOY_DWI/FMRI_HD_120/*/%s/%s/%s_*_%s_FS/%s/%s*%s'
     probRegex = 'Experiments/20120801.SubjectOrganized_Results/FMRI_HD_120/*/%s/%s/%s'
     grabber.inputs.field_template = dict(fmri_dicom_dir=fmriRegex,
                                          t1_File=fS_Regex,
+                                         fsLabels=fS_LabelRegex,
                                          f1_File=fS_Regex,
                                          f2_File=fS_Regex,
                                          csfFile=probRegex,
@@ -79,9 +83,12 @@ def pipeline(args):
                                                          'FMRI_RestingStateConnectivity']],
                                         t1_File=[['session_id', '10_AUTO.NN3Tv20110419',
                                                   'JOY_v51_2011', 'session_id', 'mri', 'brain.mgz']],
-                                        f1_File=[['session_id', '10_AUTO.NN3Tv20110419',
-                                                  'JOY_v51_2011', 'session_id', 'mri_nifti',
-                                                  'aparc+aseg.nii.gz']],
+                                        fsLabels = [['session_id', '10_AUTO.NN3Tv20110419',
+                                                     'JOY_v51_2011', 'session_id', 'mri_nifti',
+                                                     'fs_prefix', '+aseg.nii.gz']],
+                                        f1_File = [['session_id', '10_AUTO.NN3Tv20110419',
+                                                    'JOY_v51_2011', 'session_id', 'mri_nifti',
+                                                    'aparc+aseg.nii.gz']],
                                         f2_File=[['session_id', '10_AUTO.NN3Tv20110419',
                                                   'JOY_v51_2011', 'session_id', 'mri_nifti',
                                                   'aparc.a2009s+aseg.nii.gz']],
@@ -279,17 +286,38 @@ def pipeline(args):
     ## Register multilabel files
     #--------------------------------------------------------------------------------------
 
-    warpFS1 = pipe.Node(interface=ApplyTransforms(), name='antsApplyTransformsFS1')
-    warpFS1.inputs.interpolation='MultiLabel'
-    preproc.connect([(bFit, warpFS1, [(('outputTransform', makeList), 'transforms')])])
-    preproc.connect(grabber, 'f1_File', warpFS1, 'input_image')
-    preproc.connect(tstat, 'out_file', warpFS1, 'reference_image')
+    fsgrabber = pipe.Node(interface=DataGrabber(infields=['session_id', 'fs_prefix'],
+                                              outfields=['fsLabels']), name='fsDataGrabber')
+    fsgrabber.iterables = ('fs_prefix', ['aparc', 'aparc.a2009'])
+    fsgrabber.inputs.base_directory = '/paulsen'
+    fsgrabber.inputs.template = '*'
+    fS_LabelRegex = 'Experiments/20120722_JOY_DWI/FMRI_HD_120/*/%s/%s/%s_*_%s_FS/%s/%s+aseg.nii.gz'
+    fsgrabber.inputs.field_template = dict(fsLabels=fS_LabelRegex)
+    fsgrabber.inputs.template_args = dict(fsLabels = [['session_id', '10_AUTO.NN3Tv20110419',
+                                                     'JOY_v51_2011', 'session_id', 'mri_nifti',
+                                                     'fs_prefix']])
+    if len(sessionID) > 1:
+        preproc.connect(sessions, 'session_id', fsgrabber, 'session_id')
+    else:
+        fsgrabber.inputs.session_id = sessionID[0]
 
-    warpFS2 = pipe.Node(interface=ApplyTransforms(), name='antsApplyTransformsFS2')
-    warpFS2.inputs.interpolation='MultiLabel'
-    preproc.connect([(bFit, warpFS2, [(('outputTransform', makeList), 'transforms')])])
-    preproc.connect(grabber, 'f2_File', warpFS2, 'input_image')
-    preproc.connect(tstat, 'out_file', warpFS2, 'reference_image')
+    warpFS = pipe.Node(interface=ApplyTransforms(), name='antsApplyTransformsFS')
+    warpFS.inputs.interpolation='MultiLabel'
+    preproc.connect([(bFit, warpFS, [(('outputTransform', makeList), 'transforms')])])
+    preproc.connect(fsgrabber, 'fsLabels', warpFS, 'input_image')
+    preproc.connect(tstat, 'out_file', warpFS, 'reference_image')
+
+    # warpFS1 = pipe.Node(interface=ApplyTransforms(), name='antsApplyTransformsFS1')
+    # warpFS1.inputs.interpolation='MultiLabel'
+    # preproc.connect([(bFit, warpFS1, [(('outputTransform', makeList), 'transforms')])])
+    # preproc.connect(grabber, 'f1_File', warpFS1, 'input_image')
+    # preproc.connect(tstat, 'out_file', warpFS1, 'reference_image')
+
+    # warpFS2 = pipe.Node(interface=ApplyTransforms(), name='antsApplyTransformsFS2')
+    # warpFS2.inputs.interpolation='MultiLabel'
+    # preproc.connect([(bFit, warpFS2, [(('outputTransform', makeList), 'transforms')])])
+    # preproc.connect(grabber, 'f2_File', warpFS2, 'input_image')
+    # preproc.connect(tstat, 'out_file', warpFS2, 'reference_image')
 
     csfAvg = pipe.Node(interface=Maskave(), name='afni3DmaskAve_csf')
     csfAvg.inputs.outputtype = 'AFNI_1D' #outputType
@@ -348,28 +376,44 @@ def pipeline(args):
 
     ###        2) Binary threshold label image for each label
     ###        3) Calculate the average fMRI value per label
-    roiStats1 = pipe.Node(interface=ROIStats(), name='afni3DroiStats1')
-    roiStats1.inputs.outputtype = 'AFNI_1D'
-    roiStats1.inputs.args = '-nzmedian -nomeanout'
-    preproc.connect(warpFS1, 'output_image', roiStats1, 'mask')
-    preproc.connect(detrend, 'out_file', roiStats1, 'in_file')
+    roiStats = pipe.Node(interface=ROIStats(), name='afni3DroiStats')
+    roiStats.inputs.outputtype = 'AFNI_1D'
+    roiStats.inputs.args = '-nzmedian -nomeanout'
+    preproc.connect(warpFS, 'output_image', roiStats, 'mask')
+    preproc.connect(detrend, 'out_file', roiStats, 'in_file')
 
-    roiStats2 = roiStats1.clone(name='afni3DroiStats2')
-    preproc.connect(warpFS2, 'output_image', roiStats2, 'mask')
-    preproc.connect(detrend, 'out_file', roiStats2, 'in_file')
+    # roiStats1 = pipe.Node(interface=ROIStats(), name='afni3DroiStats1')
+    # roiStats1.inputs.outputtype = 'AFNI_1D'
+    # roiStats1.inputs.args = '-nzmedian -nomeanout'
+    # preproc.connect(warpFS1, 'output_image', roiStats1, 'mask')
+    # preproc.connect(detrend, 'out_file', roiStats1, 'in_file')
+
+    # roiStats2 = roiStats1.clone(name='afni3DroiStats2')
+    # preproc.connect(warpFS2, 'output_image', roiStats2, 'mask')
+    # preproc.connect(detrend, 'out_file', roiStats2, 'in_file')
 
     ###         4) Output label covariance matrix to a file
-    writeFile1 = pipe.Node(interface=Function(function=writeMat,
-                                              input_names=['in_file'],
-                                              output_names=['fileName1']),
-                           name='writeMatFile1')
-    preproc.connect(roiStats1, 'stats', writeFile1, 'in_file')
+    writeFile = pipe.Node(interface=Function(function=writeMat,
+                                             input_names=['in_file'],
+                                             output_names=['fileName']),
+                           name='writeMatFile')
+    preproc.connect(roiStats, 'stats', writeFile, 'in_file')
 
-    writeFile2 = writeFile1.clone(name='writeMatFile2')
-    writeFile2.interface.output_names=['fileName2']
-    preproc.connect(roiStats2, 'stats', writeFile2, 'in_file')
+    # writeFile1 = pipe.Node(interface=Function(function=writeMat,
+    #                                           input_names=['in_file'],
+    #                                           output_names=['fileName1']),
+    #                        name='writeMatFile1')
+    # preproc.connect(roiStats1, 'stats', writeFile1, 'in_file')
 
-    ###TODO: DataSink
+    # writeFile2 = writeFile1.clone(name='writeMatFile2')
+    # writeFile2.interface.output_names=['fileName2']
+    # preproc.connect(roiStats2, 'stats', writeFile2, 'in_file')
+
+    # if len(sessionID) > 1:
+    #     preproc.connect(sessions, ('session_id', generateMatSubstitution), sinker, 'substitutions')
+    # else:
+    #     sinker.inputs.substitutions = generateMatSubstitution()
+    # preproc.connect()
 
     preproc.write_graph()
     preproc.write_hierarchical_dotfile(dotfilename='dave.dot')
