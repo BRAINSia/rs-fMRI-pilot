@@ -20,21 +20,23 @@ try:
 except KeyError:
     old_fallback = ''
 
-os.environ['PATH'] = '/Volumes/scratch/welchdm/bld/BSA-20121108/bin:' + \
+os.environ['PATH'] = '/Volumes/scratch/welchdm/bld/BSA-20121211-FSNipype/bin:' + \
     '/opt/afni-OSX_10.7:' + '/opt/freesurfer_v4.5.0-full/bin:' + old_path
 
-os.environ['DYLD_LIBRARY_PATH'] = '/Volumes/scratch/welchdm/bld/BSA-20121108/lib:' + \
-    '/Volumes/scratch/welchdm/bld/BSA-20121108/bin:' + \
+os.environ['DYLD_LIBRARY_PATH'] = '/Volumes/scratch/welchdm/bld/BSA-20121211-FSNipype/lib:' + \
+    '/Volumes/scratch/welchdm/bld/BSA-20121211-FSNipype/bin:' + \
     '/opt/freesurfer_v4.5.0-full/lib:' + old_dyld
 
 os.environ['DYLD_FALLBACK_LIBRARY_PATH'] = '/opt/afni-OSX_10.7:' + old_fallback
 
 sys.path.insert(1, '/Volumes/scratch/welchdm/src/nipype/nipype')
-sys.path.insert(2, '/Volumes/scratch/welchdm/bld/BSA-20121108/SimpleITK-build/lib')
+sys.path.insert(2, '/Volumes/scratch/welchdm/bld/BSA-20121211-FSNipype/SimpleITK-build/lib')
 sys.path.insert(3, '/Volumes/scratch/welchdm/src/BRAINSStandAlone/AutoWorkup')
 ### END HACK ###
 
-from SEMTools import BRAINSFit
+import SEMTools as sem
+#from SEMTools import diffusion as semd
+#from SEMTools import registration as semr
 from nipype.interfaces.ants.registration import Registration
 from nipype.interfaces.ants.resampling import ApplyTransforms
 from nipype.interfaces.afni.preprocess import *
@@ -45,7 +47,7 @@ from nipype.interfaces.utility import Merge as Merger
 import nipype.pipeline.engine as pipe
 import numpy
 
-import convert
+# import convert
 from utilities import *
 
 def pipeline(args):
@@ -94,9 +96,10 @@ def pipeline(args):
     # else:
     #     grabber.inputs.session_id = sessionID[0]
 
-    dicomNrrd = pipe.Node(interface=convert.DWIconvert(), name='dicomToNrrd')
+    dicomNrrd = pipe.Node(interface=sem.DWIConvert(), name='dicomToNrrd')
     dicomNrrd.inputs.conversionMode = 'DicomToNrrd'
     dicomNrrd.inputs.outputDirectory = '.'  # Cache directory
+    dicomNrrd.inputs.outputVolume = 'converted.nrrd'
     preproc.connect(grabber, 'fmri_dicom_dir', dicomNrrd, 'inputDicomDirectory')
 
     grep = pipe.Node(interface=Function(function=readNrrdHeader,
@@ -224,7 +227,7 @@ def pipeline(args):
     convertF1 = converter.clone('F1Converter')
     convertF2 = converter.clone('F2Converter')
 
-    bFit = pipe.Node(interface=BRAINSFit(), name='brainsFit')
+    bFit = pipe.Node(interface=sem.BRAINSFit(), name='brainsFit')
     bFit.inputs.initializeTransformMode = 'useCenterOfHeadAlign'
     bFit.inputs.maskProcessingMode = 'ROIAUTO'
     bFit.inputs.ROIAutoDilateSize = 10.0
