@@ -128,10 +128,13 @@ def writeMat(in_file):
         labels = np.array(valid_labels, dtype='int', ndmin=1)
     corr = np.corrcoef(data)
     temp, _ = os.path.basename(in_file).split('.')
-    savemat(file_name=temp + '_corr', mdict={'data':corr}, appendmat=True, oned_as='row')
-    savemat(file_name=temp + '_labels', mdict={'data':labels}, appendmat=True, oned_as='row')
-    savemat(file_name=temp + '_raw', mdict={'data':data}, appendmat=True, oned_as='row')
-    return temp + '_corr.mat'
+    corrFile = os.path.abspath(temp + '_corr.mat')
+    labelFile = os.path.abspath(temp + '_labels.mat')
+    rawFile = os.path.abspath(temp + '_raw.mat')
+    savemat(file_name=corrFile, mdict={'data':corr}, appendmat=True, oned_as='row')
+    savemat(file_name=labelFile, mdict={'data':labels}, appendmat=True, oned_as='row')
+    savemat(file_name=rawFile, mdict={'data':data}, appendmat=True, oned_as='row')
+    return corrFile, labelFile, rawFile
 
 def generateMatSubstitution(in_file, session):
     import os.path

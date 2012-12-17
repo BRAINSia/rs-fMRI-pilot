@@ -35,8 +35,6 @@ sys.path.insert(3, '/Volumes/scratch/welchdm/src/BRAINSStandAlone/AutoWorkup')
 ### END HACK ###
 
 import SEMTools as sem
-#from SEMTools import diffusion as semd
-#from SEMTools import registration as semr
 from nipype.interfaces.ants.registration import Registration
 from nipype.interfaces.ants.resampling import ApplyTransforms
 from nipype.interfaces.afni.preprocess import *
@@ -47,7 +45,6 @@ from nipype.interfaces.utility import Merge as Merger
 import nipype.pipeline.engine as pipe
 import numpy
 
-# import convert
 from utilities import *
 
 def pipeline(args):
@@ -64,7 +61,7 @@ def pipeline(args):
 
     grabber = pipe.Node(interface=DataGrabber(infields=['session_id'],
                                               outfields=['fmri_dicom_dir', 't1_File',
-                                                         'f1_File', 'f2_File', 'csfFile',
+                                                         'faparc_File', 'faparc2009_File', 'csfFile',
                                                          'whmFile']), name='dataGrabber')
     grabber.inputs.base_directory = '/paulsen'
     grabber.inputs.template = '*'
@@ -73,18 +70,18 @@ def pipeline(args):
     probRegex = 'Experiments/20120801.SubjectOrganized_Results/FMRI_HD_120/*/%s/%s/%s'
     grabber.inputs.field_template = dict(fmri_dicom_dir=fmriRegex,
                                          t1_File=fS_Regex,
-                                         f1_File=fS_Regex,
-                                         f2_File=fS_Regex,
+                                         faparc_File=fS_Regex,
+                                         faparc2009_File=fS_Regex,
                                          csfFile=probRegex,
                                          whmFile=probRegex)
     grabber.inputs.template_args = dict(fmri_dicom_dir=[['session_id', 'ANONRAW',
                                                          'FMRI_RestingStateConnectivity']],
                                         t1_File=[['session_id', '10_AUTO.NN3Tv20110419',
                                                   'JOY_v51_2011', 'session_id', 'mri', 'brain.mgz']],
-                                        f1_File=[['session_id', '10_AUTO.NN3Tv20110419',
+                                        faparc_File=[['session_id', '10_AUTO.NN3Tv20110419',
                                                   'JOY_v51_2011', 'session_id', 'mri_nifti',
                                                   'aparc+aseg.nii.gz']],
-                                        f2_File=[['session_id', '10_AUTO.NN3Tv20110419',
+                                        faparc2009_File=[['session_id', '10_AUTO.NN3Tv20110419',
                                                   'JOY_v51_2011', 'session_id', 'mri_nifti',
                                                   'aparc.a2009s+aseg.nii.gz']],
                                         csfFile=[['session_id', 'ACCUMULATED_POSTERIORS',
@@ -285,13 +282,13 @@ def pipeline(args):
     warpFS1 = pipe.Node(interface=ApplyTransforms(), name='antsApplyTransformsFS1')
     warpFS1.inputs.interpolation='MultiLabel'
     preproc.connect([(bFit, warpFS1, [(('outputTransform', makeList), 'transforms')])])
-    preproc.connect(grabber, 'f1_File', warpFS1, 'input_image')
+    preproc.connect(grabber, 'faparc_File', warpFS1, 'input_image')
     preproc.connect(tstat, 'out_file', warpFS1, 'reference_image')
 
     warpFS2 = pipe.Node(interface=ApplyTransforms(), name='antsApplyTransformsFS2')
     warpFS2.inputs.interpolation='MultiLabel'
     preproc.connect([(bFit, warpFS2, [(('outputTransform', makeList), 'transforms')])])
-    preproc.connect(grabber, 'f2_File', warpFS2, 'input_image')
+    preproc.connect(grabber, 'faparc2009_File', warpFS2, 'input_image')
     preproc.connect(tstat, 'out_file', warpFS2, 'reference_image')
 
     csfAvg = pipe.Node(interface=Maskave(), name='afni3DmaskAve_csf')
@@ -364,20 +361,31 @@ def pipeline(args):
     ###         4) Output label covariance matrix to a file
     writeFile1 = pipe.Node(interface=Function(function=writeMat,
                                               input_names=['in_file'],
-                                              output_names=['fileName1']),
+                                              output_names=['corr_file', 'label_file', 'raw_file']),
                            name='writeMatFile1')
     preproc.connect(roiStats1, 'stats', writeFile1, 'in_file')
 
     writeFile2 = writeFile1.clone(name='writeMatFile2')
-    writeFile2.interface.output_names=['fileName2']
     preproc.connect(roiStats2, 'stats', writeFile2, 'in_file')
 
     ###TODO: DataSink
     sinker = pipe.Node(interface=DataSink(), name="rsDataSink")
-    sinker.inputs.base_directory = os.getcwd()
-    sinker.inputs.container = 'Results'
-    find_pattern = '(?<prefix>[a-zA-Z3]*)_(?<matrix>[a-z]*)\.mat'
-    sinker.inputs.regexp_substitutions = [('_smoother[\d]*/', '')]
+    sinker.inputs.base_directory = '/paulsen/Experiments/rsFMRI-test/Results'
+    find_matlab = 'errts_Decon+orig_dtroiStat'
+    repl_matlab = 'freesurfer'
+    sinker.inputs.substitutions = [(find_matlab, repl_matlab)]
+    sinker.inputs.regexp_substitutions = [('([a-zA-Z0-9_]*)/freesurfer', 'freesurfer')]
+    def createStr(value):
+        return str(value)
+
+    preproc.connect(sessions, ('session_id', createStr), sinker, 'container')
+    preproc.connect(writeFile1, 'corr_file', sinker, 'aparc.@corr')
+    preproc.connect(writeFile1, 'label_file', sinker, 'aparc.@label')
+    preproc.connect(writeFile1, 'raw_file', sinker, 'aparc.@raw')
+
+    preproc.connect(writeFile2, 'corr_file', sinker, 'aparca2009s.@corr')
+    preproc.connect(writeFile2, 'label_file', sinker, 'aparca2009s.@label')
+    preproc.connect(writeFile2, 'raw_file', sinker, 'aparca2009s.@raw')
 
     preproc.write_graph()
     preproc.write_hierarchical_dotfile(dotfilename='dave.dot')
@@ -390,7 +398,7 @@ if __name__ == '__main__':
                         default='NIFTI', help='File type for outputs.  Values: "NIFTI_GZ", "AFNI", "NIFTI" (default)')
     parser.add_argument('-n','--name', action='store', dest='name', type=str, required=True,
                         help='Name (required)')
-    parser.add_argument('-s', '--session', action='store', dest='sessionID', type=int, required=True,
+    parser.add_argument('-s', '--session', action='store', dest='sessionID', type=str, required=True,
                         nargs='*', help='list of session IDs (required)')
     args = parser.parse_args()
     freesurferOutputTypes = {"NIFTI_GZ" : "niigz",
