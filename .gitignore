@@ -35,3 +35,4 @@ rs_fmri_workflow/
 *.n*
 logs/
 *\#*
+*.csv
