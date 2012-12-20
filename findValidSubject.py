@@ -21,17 +21,20 @@ def findMatches(filename, pattern = '*', index = 5):
 
 
 if __name__ == '__main__':
-    mrx = findMatches('dicom.txt', '/paulsen/MRx/FMRI_HD_120/*/*/ANONRAW/FMRI_RestingStateConnectivity', 5)
+    mrx = findMatches('dicom.txt', '/paulsen/MRx/FMRI_HD_024/*/*/ANONRAW/FMRI_RestingStateConnectivity', 5)
     print "Found all DICOMs"
     print mrx
-    fs = findMatches('freesurf.txt', '/paulsen/Experiments/20120722_JOY_DWI/FMRI_HD_120/*/*/10_AUTO.NN3Tv20110419/*_FS/mri', 6)
+    fs = findMatches('freesurf.txt', '/paulsen/Experiments/20120722_JOY_DWI/FMRI_HD_024/*/*/10_AUTO.NN3Tv20110419/*_FS/mri', 6)
     print "Found all brain.mgz"
     print fs
     canidates = mrx.intersection(fs)
     post = findMatches('posterior.txt',
-                       '/paulsen/Experiments/20120801.SubjectOrganized_Results/FMRI_HD_120/*/*/ACCUMULATED_POSTERIORS', 6)
+                       '/paulsen/Experiments/20120801.SubjectOrganized_Results/FMRI_HD_024/*/*/ACCUMULATED_POSTERIORS', 6)
     print "Found all posteriors"
     print post
     usable = canidates.intersection(post)
     print "\n\n\nThis is the usable list: \n\n\n"
-    print usable
+    usable = list(usable)
+    usable.sort()
+    string = ''
+    print [string + '%d ' % int(session) for session in usable]
