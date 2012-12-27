@@ -27,7 +27,9 @@ for index = 1:size(fileArray,1)
     maximum = nanmax(nanmax(array));
     median = nanmedian(nanmedian(array));
     mean = nanmean(nanmean(array));
+    echo
     newfilename = strcat(filename(1:end-4), '_clean+stats.mat');
+    echo
     save(newfilename, 'array', 'minimum', 'maximum', 'median', 'mean');
     % hist(array(:))
     % hist(array(:), 25)
