@@ -6,34 +6,6 @@ import argparse
 import os
 import sys
 
-### HACK: Set PYTHONPATH, DYLD_LIBRARY_PATH, FREESURFER_HOME, and SUBJECTS_DIR for Athena ###
-### export PATH=$PATH:/opt/afni-OSX_10.7:/opt/freesurfer_v4.5.0-full/bin ###
-os.environ['FREESURFER_HOME'] = '/opt/freesurfer_v4.5.0-full'
-os.environ['SUBJECTS_DIR'] = '/paulsen/MRx'
-try:
-    old_dyld = os.environ['DYLD_LIBRARY_PATH']
-except KeyError:
-    old_dyld = ''
-old_path = os.environ['PATH']
-try:
-    old_fallback = os.environ['DYLD_FALLBACK_LIBRARY_PATH']
-except KeyError:
-    old_fallback = ''
-
-os.environ['PATH'] = '/Volumes/scratch/welchdm/bld/BSA-20121211-FSNipype/bin:' + \
-    '/opt/afni-OSX_10.7:' + '/opt/freesurfer_v4.5.0-full/bin:' + old_path
-
-os.environ['DYLD_LIBRARY_PATH'] = '/Volumes/scratch/welchdm/bld/BSA-20121211-FSNipype/lib:' + \
-    '/Volumes/scratch/welchdm/bld/BSA-20121211-FSNipype/bin:' + \
-    '/opt/freesurfer_v4.5.0-full/lib:' + old_dyld
-
-os.environ['DYLD_FALLBACK_LIBRARY_PATH'] = '/opt/afni-OSX_10.7:' + old_fallback
-
-sys.path.insert(1, '/Volumes/scratch/welchdm/src/nipype/nipype')
-sys.path.insert(2, '/Volumes/scratch/welchdm/bld/BSA-20121211-FSNipype/SimpleITK-build/lib')
-sys.path.insert(3, '/Volumes/scratch/welchdm/src/BRAINSStandAlone/AutoWorkup')
-### END HACK ###
-
 import SEMTools as sem
 from nipype.interfaces.ants.registration import Registration
 from nipype.interfaces.ants.resampling import ApplyTransforms
@@ -407,14 +379,4 @@ if __name__ == '__main__':
                              "NIFTI" : "nii"}
     args.fOutputType = freesurferOutputTypes[args.outputType]
     outvalue = pipeline(args)
-    ### HACK ###
-    os.environ['FREESURFER_HOME'] = ''
-    os.environ['SUBJECTS_DIR'] = ''
-    os.environ['PATH'] = old_path
-    os.environ['DYLD_LIBRARY_PATH'] = old_dyld
-    os.environ['DYLD_FALLBACK_LIBRARY_PATH'] = old_fallback
-    sys.path.pop(3)
-    sys.path.pop(2)
-    sys.path.pop(1)
-    ### END HACK ###
     sys.exit(outvalue)
