@@ -47,7 +47,7 @@ def dicomRead(infolder):
         if "RepetitionTime" in meta:
             return meta.data_element('RepetitionTime').value
     raise Exception('None of the dicom files in %s contain \
-                     "Repetition Time" where PyDicom can find it!' % infolder)
+                    "Repetition Time" where PyDicom can find it!' % infolder)
 
 def generateTissueMask(input_file, low=0.0, high=1.0, erodeFlag=True):
     """
@@ -102,8 +102,16 @@ def writeMat(in_file):
     """
     Pass output of afni.preprocess.ROIStat() to be written as .mat file
 
-    Nota bene: ROIStats() should only output ONE AND ONLY ONE
-    Based on code on Stackflow:
+    Nota bene: ROIStats() should only output ONE AND ONLY ONE file
+        The format of the input file is:
+        --------------------------
+        File  Sub-brick  NZMed_2  NZMed_4 ...
+        <filename>  0[#4] -0.337481	 0.358179  ...
+        <filename>  0[#4] 1.524675	 0.230819  ...
+        ...
+        --------------------------
+
+    Based on code from Stackflow:
            (http://stackoverflow.com/questions/1095265/matrix-from-python-to-matlab)
     """
     import os
@@ -116,17 +124,18 @@ def writeMat(in_file):
         for valueStr in fID.readlines():
             value_list = valueStr.split()
             if count == 0:
+                # Header line
                 column_header = value_list[2:]
-                valid_labels = [item.strip('NZMed_') for item in column_header]
-                columns = len(column_header)
+                regionsLabel = [item.strip('NZMed_') for item in column_header]
+                # columns = len(column_header)
+                count += 1
             else:
-                timepoint.append(value_list[1].split('[')[0])
+                # timepoint.append(value_list[1].split('[')[0]) # Sub-brick
                 row_data.append(value_list[2:])
-            count += 1
-        rows = len(timepoint)
+        #rows = len(timepoint)
         data = np.array(row_data, dtype='float', ndmin=2)
-        labels = np.array(valid_labels, dtype='int', ndmin=1)
-    corr = np.corrcoef(data)
+        labels = np.array(regionsLabel, dtype='int', ndmin=1)
+    corr = np.corrcoef(data, rowvar=0) # Set rowvar > 0 to correlate timepoints, rowvar = 0 for regions
     temp, _ = os.path.basename(in_file).split('.')
     corrFile = os.path.abspath(temp + '_corr.mat')
     labelFile = os.path.abspath(temp + '_labels.mat')
