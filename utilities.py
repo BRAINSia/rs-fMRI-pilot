@@ -8,6 +8,12 @@ def makeList(input):
     """
     return [input]
 
+def concatTransforms(transform1, transform2):
+    """
+    Hack to put two transforms into a list
+    """
+    return [transform1, transform2]
+
 def splitList(in_list):
     t1_out = in_list[0]
     label1_out = in_lits[1]
@@ -151,3 +157,60 @@ def generateMatSubstitution(in_file, session):
     replaceString = "{session}_{suffix}".format(session=session,
                                                 suffix=oldString.split('roiStat_')[1])
     return [(oldString, replaceString)]
+
+def getAtlasPoints(filename):
+    """ Assumes file with text header:
+
+    """
+    talairach = []
+    nac = []
+    with open(filename, 'r') as fid:
+        count = 0
+        for line in fid.readlines():
+            if count > 0:
+                x1, y1, z1, x2, y2, z2 = line.split(',')
+                talairach.append((float(x1), float(y1), float(z1)))
+                nac.append((float(x2), float(y2), float(z2)))
+            else:
+                # Ignore header line
+                count += 1
+    return talairach, nac
+
+def createSphereExpression(coordinates, radius=5):
+    """
+    For left DLPFC with Tailarach coordinates (-42, 30, 24) and 5mm radius sphere:
+
+    3dcalc -a TT_icbm452+tlrc.nii \
+           -expr 'step(25-(x-42)*(x-42)-(y-(-30))*(y-(-30))-(z-24)*(z-24))' \
+           -prefix left_dlPFC3+tlrc.nii
+
+    ### Nota Bene: x- and y- coordinates change sign in expression
+
+    Return: 'step(25-(x-42)*(x-42)-(y+30)*(y+30)-(z-24)*(z-24))'
+
+    Test: (-)
+    """
+    assert isinstance(coordinates, tuple), "Coordinates MUST be a tuple"
+    expression = 'step(%d-' % radius**2
+    axes = ('x', 'y', 'z')
+    for index in range(len(axes)):
+        if axes[index] == 'z':
+            value = int(coordinates[index]) * (-1)
+            nextChar = ')'
+        else:
+            # We are reversing the y-coordinate b/c AFNI's RAS space is NOT DICOM-compliant.
+            # It is actually "small-centric", not "large-centric"
+            # if axes[index] == 'y':
+            #     value = int(coordinates[index]) * (-1)
+            # else:
+            #     value = int(coordinates[index])
+            value = int(coordinates[index]) * (-1)
+            nextChar = '-'
+        if value >= 0:
+            expression += '({0}+{1})*({0}+{1})'.format(axes[index], value)
+        else:
+            # abs() to avoid printing "--"
+            expression += '({0}-{1})*({0}-{1})'.format(axes[index], abs(value))
+        expression += nextChar
+    return expression
+

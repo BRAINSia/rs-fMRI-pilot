@@ -25,6 +25,10 @@ def pipeline(args):
     fOutputType = args.fOutputType
     print args.name
     preproc = pipe.Workflow(updatehash=True, name="workflow_" + args.name)
+    if  args.pipelineOption == 'iowa':
+        preproc.name += "_iowa"
+    else:
+        preproc.name += "_csail"
     preproc.base_dir = os.getcwd()
 
     site = 'FMRI_HD_024'
@@ -86,7 +90,7 @@ def pipeline(args):
     to_3D_str = pipe.Node(interface=Function(function=strCreate,
                                              input_names=['slices', 'volumes', 'repTime'],
                                              output_names=['out_string']),
-                                             name='strCreate')
+                          name='strCreate')
     preproc.connect(grep, 'slices', to_3D_str, 'slices')                 #1
     preproc.connect(grep, 'volumes', to_3D_str, 'volumes')
     preproc.connect(dicom, 'repTime', to_3D_str, 'repTime')
@@ -247,23 +251,6 @@ def pipeline(args):
     wmmask.inputs.erodeFlag = True
     preproc.connect(warpWHM, 'output_image', wmmask, 'input_file')        #11
 
-    ### TODO: Extract ROIs
-    ###         1) Register labels with fMRI
-    ## Register multilabel files
-    #--------------------------------------------------------------------------------------
-
-    warpFS1 = pipe.Node(interface=ApplyTransforms(), name='antsApplyTransformsFS1')
-    warpFS1.inputs.interpolation='MultiLabel'
-    preproc.connect([(bFit, warpFS1, [(('outputTransform', makeList), 'transforms')])])
-    preproc.connect(grabber, 'faparc_File', warpFS1, 'input_image')
-    preproc.connect(tstat, 'out_file', warpFS1, 'reference_image')
-
-    warpFS2 = pipe.Node(interface=ApplyTransforms(), name='antsApplyTransformsFS2')
-    warpFS2.inputs.interpolation='MultiLabel'
-    preproc.connect([(bFit, warpFS2, [(('outputTransform', makeList), 'transforms')])])
-    preproc.connect(grabber, 'faparc2009_File', warpFS2, 'input_image')
-    preproc.connect(tstat, 'out_file', warpFS2, 'reference_image')
-
     csfAvg = pipe.Node(interface=Maskave(), name='afni3DmaskAve_csf')
     csfAvg.inputs.outputtype = 'AFNI_1D' #outputType
     csfAvg.inputs.args = '-median' # TODO
@@ -319,46 +306,127 @@ def pipeline(args):
     detrend.inputs.args = '-polort 3' # TODO
     preproc.connect(deconvolve, 'out_errts', detrend, 'in_file')          #13
 
-    ###        2) Binary threshold label image for each label
-    ###        3) Calculate the average fMRI value per label
-    roiStats1 = pipe.Node(interface=ROIStats(), name='afni3DroiStats1')
-    roiStats1.inputs.outputtype = 'AFNI_1D'
-    roiStats1.inputs.args = '-nzmedian -nomeanout'
-    preproc.connect(warpFS1, 'output_image', roiStats1, 'mask')
-    preproc.connect(detrend, 'out_file', roiStats1, 'in_file')
+    if args.pipelineOption == 'iowa':
+        ### Create seed points
+        talairach, nac = getAtlasPoints('seeds.txt')
+        nacAtlasFile = "/IPLlinux/ipldev/scratch/welchdm/bld/rs-fMRI/BSA/ReferenceAtlas-build/Atlas/Atlas_20130106/template_t1.nii.gz"
+        points = pipe.Node(interface=Function(function=createSphereExpression, input_names=['coordinates', 'radius'],
+                                              output_names=['expression']), name='createSphereExpression')
+        points.iterables = ('coordinates', nac)
+        spheres = pipe.Node(interface=Calc(letters=['a']), name='afni3Dcalc_seeds')
+        spheres.inputs.outputtype = outputType
+        spheres.inputs.in_file_a = nacAtlasFile
+        spheres.inputs.args = '-nscale'
 
-    roiStats2 = roiStats1.clone(name='afni3DroiStats2')
-    preproc.connect(warpFS2, 'output_image', roiStats2, 'mask')
-    preproc.connect(detrend, 'out_file', roiStats2, 'in_file')
+        preproc.connect(points, 'expression', spheres, 'expr')
 
-    ###         4) Output label covariance matrix to a file
-    writeFile1 = pipe.Node(interface=Function(function=writeMat,
-                                              input_names=['in_file'],
-                                              output_names=['corr_file', 'label_file', 'raw_file']),
-                           name='writeMatFile1')
-    preproc.connect(roiStats1, 'stats', writeFile1, 'in_file')
+        # Warp seed output to detrend
+        transformGrabber = pipe.Node(interface=DataGrabber(infields=['session_id'],
+                                                           outfields=['atlasToSessionTransform']),
+                                     name='transformGrabber')
+        transformGrabber.inputs.base_directory = '/paulsen/Experiments/20130202_PREDICTHD_Results/SubjectToAtlasWarped'
+        transformGrabber.inputs.template = '*'
+        transformRegex = '%s/AtlasToSubject_Composite.h5'
+        transformGrabber.inputs.field_template = dict(atlasToSessionTransform=transformRegex)
+        transformGrabber.inputs.template_args = dict(atlasToSessionTransform=[['session_id']])
 
-    writeFile2 = writeFile1.clone(name='writeMatFile2')
-    preproc.connect(roiStats2, 'stats', writeFile2, 'in_file')
+        preproc.connect(sessions, 'session_id', transformGrabber, 'session_id')
 
-    ###TODO: DataSink
-    sinker = pipe.Node(interface=DataSink(), name="rsDataSink")
-    sinker.inputs.base_directory = '/paulsen/Experiments/rsFMRI-test/Results'
-    find_matlab = 'errts_Decon+orig_dtroiStat'
-    repl_matlab = 'freesurfer'
-    sinker.inputs.substitutions = [(find_matlab, repl_matlab)]
-    sinker.inputs.regexp_substitutions = [('([a-zA-Z0-9_]*)/freesurfer', 'freesurfer')]
-    def createStr(value):
-        return str(value)
+        nacToFMRI = pipe.Node(interface=ApplyTransforms(), name="antsApplyTransformsNAC")
+        nacToFMRI.inputs.interpolation = 'Linear'
 
-    preproc.connect(sessions, ('session_id', createStr), sinker, 'container')
-    preproc.connect(writeFile1, 'corr_file', sinker, 'aparc.@corr')
-    preproc.connect(writeFile1, 'label_file', sinker, 'aparc.@label')
-    preproc.connect(writeFile1, 'raw_file', sinker, 'aparc.@raw')
+        preproc.connect(spheres, 'out_file', nacToFMRI, 'input_image')
+        preproc.connect(warpT1, 'output_image', nacToFMRI, 'reference_image')
 
-    preproc.connect(writeFile2, 'corr_file', sinker, 'aparca2009s.@corr')
-    preproc.connect(writeFile2, 'label_file', sinker, 'aparca2009s.@label')
-    preproc.connect(writeFile2, 'raw_file', sinker, 'aparca2009s.@raw')
+        # Apply two transforms: NAC -> T1 -> fMRI
+        concatTransformsNode = pipe.Node(interface=Function(function=concatTransforms,
+                                                            input_names=['transform1', 'transform2'],
+                                                            output_names=['transformList']),
+                                         name='concatTransforms')
+        preproc.connect(bFit, 'outputTransform', concatTransformsNode, 'transform1')
+        preproc.connect(transformGrabber, 'atlasToSessionTransform', concatTransformsNode, 'transform2')
+        preproc.connect(concatTransformsNode, 'transformList', nacToFMRI, 'transforms')
+
+        roiMedian = pipe.Node(interface=Maskave(), name='afni_roiMedian')
+        roiMedian.inputs.outputtype = 'AFNI_1D'
+        roiMedian.inputs.args = '-median -mrange 1 1'  ### TODO
+        roiMedian.inputs.quiet = True
+        preproc.connect(nacToFMRI, 'output_image', roiMedian, 'mask')
+        preproc.connect(detrend, 'out_file', roiMedian, 'in_file')
+
+        correlate = pipe.Node(interface=Fim(), name='afni_correlate')
+        correlate.inputs.out = 'Correlation'
+        preproc.connect(roiMedian, 'out_file', correlate, 'ideal_file')
+        preproc.connect(deconvolve, 'out_errts', correlate, 'in_file')
+
+        regionLogCalc = pipe.Node(interface=Calc(letters=['a']), name='afni_regionLogCalc')
+        regionLogCalc.inputs.outputtype = outputType
+        regionLogCalc.inputs.expr = 'log((1+a)/(1-a))/2'
+        preproc.connect(correlate, 'out_file', regionLogCalc, 'in_file_a')
+
+        ## sinker = pipe.Node(interface=DataSink(), name="rsDataSink")
+        ## sinker.inputs.base_directory = '/paulsen/Experiments/rsFMRI-test/iowa_Results'
+
+        ## def createStr(value):
+        ##     return str(value)
+
+        ## preproc.connect(sessions, ('session_id', createStr), sinker, 'container')
+        ## preproc.connect(regionLogCalc, 'out_file', sinker, 'aparc.@logCalc')
+
+    elif args.pipelineOption == 'csail':
+
+        warpFS1 = pipe.Node(interface=ApplyTransforms(), name='antsApplyTransformsFS1')
+        warpFS1.inputs.interpolation='MultiLabel'
+        preproc.connect([(bFit, warpFS1, [(('outputTransform', makeList), 'transforms')])])
+        preproc.connect(grabber, 'faparc_File', warpFS1, 'input_image')
+        preproc.connect(tstat, 'out_file', warpFS1, 'reference_image')
+
+        warpFS2 = pipe.Node(interface=ApplyTransforms(), name='antsApplyTransformsFS2')
+        warpFS2.inputs.interpolation='MultiLabel'
+        preproc.connect([(bFit, warpFS2, [(('outputTransform', makeList), 'transforms')])])
+        preproc.connect(grabber, 'faparc2009_File', warpFS2, 'input_image')
+        preproc.connect(tstat, 'out_file', warpFS2, 'reference_image')
+
+        ###        2) Binary threshold label image for each label
+        ###        3) Calculate the average fMRI value per label
+        roiStats1 = pipe.Node(interface=ROIStats(), name='afni3DroiStats1')
+        roiStats1.inputs.outputtype = 'AFNI_1D'
+        roiStats1.inputs.args = '-nzmedian -nomeanout'
+        preproc.connect(warpFS1, 'output_image', roiStats1, 'mask')
+        preproc.connect(detrend, 'out_file', roiStats1, 'in_file')
+
+        roiStats2 = roiStats1.clone(name='afni3DroiStats2')
+        preproc.connect(warpFS2, 'output_image', roiStats2, 'mask')
+        preproc.connect(detrend, 'out_file', roiStats2, 'in_file')
+
+        ###         4) Output label covariance matrix to a file
+        writeFile1 = pipe.Node(interface=Function(function=writeMat,
+                                                  input_names=['in_file'],
+                                                  output_names=['corr_file', 'label_file', 'raw_file']),
+                               name='writeMatFile1')
+        preproc.connect(roiStats1, 'stats', writeFile1, 'in_file')
+
+        writeFile2 = writeFile1.clone(name='writeMatFile2')
+        preproc.connect(roiStats2, 'stats', writeFile2, 'in_file')
+
+        ###TODO: DataSink
+        sinker = pipe.Node(interface=DataSink(), name="rsDataSink")
+        sinker.inputs.base_directory = '/paulsen/Experiments/rsFMRI-test/csail_Results'
+        find_matlab = 'errts_Decon+orig_dtroiStat'
+        repl_matlab = 'freesurfer'
+        sinker.inputs.substitutions = [(find_matlab, repl_matlab)]
+        sinker.inputs.regexp_substitutions = [('([a-zA-Z0-9_]*)/freesurfer', 'freesurfer')]
+        def createStr(value):
+            return str(value)
+
+        preproc.connect(sessions, ('session_id', createStr), sinker, 'container')
+        preproc.connect(writeFile1, 'corr_file', sinker, 'aparc.@corr')
+        preproc.connect(writeFile1, 'label_file', sinker, 'aparc.@label')
+        preproc.connect(writeFile1, 'raw_file', sinker, 'aparc.@raw')
+
+        preproc.connect(writeFile2, 'corr_file', sinker, 'aparca2009s.@corr')
+        preproc.connect(writeFile2, 'label_file', sinker, 'aparca2009s.@label')
+        preproc.connect(writeFile2, 'raw_file', sinker, 'aparca2009s.@raw')
 
     preproc.write_graph()
     preproc.write_hierarchical_dotfile(dotfilename='dave.dot')
@@ -373,10 +441,15 @@ if __name__ == '__main__':
                         help='Name (required)')
     parser.add_argument('-s', '--session', action='store', dest='sessionID', type=str, required=True,
                         nargs='*', help='list of session IDs (required)')
+    parser.add_argument('-p', '--pipelineOption', action='store', dest='pOption', type=str, required=False, default='csail',
+                        help='Specify the pipeline to execute.  Values: "IOWA", "CSAIL"(default)')
     args = parser.parse_args()
     freesurferOutputTypes = {"NIFTI_GZ" : "niigz",
                              "AFNI" : "afni",
                              "NIFTI" : "nii"}
+    pipelineOptions = {"CSAIL" : "csail",
+                       "IOWA" : "iowa"}
     args.fOutputType = freesurferOutputTypes[args.outputType]
+    args.pipelineOption = pipelineOptions[args.pOption]
     outvalue = pipeline(args)
     sys.exit(outvalue)
