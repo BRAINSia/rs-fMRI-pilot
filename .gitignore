@@ -31,8 +31,9 @@ pip-log.txt
 crash-*
 
 #rs-fMRI
-rs_fmri_workflow/
+*workflow*/
 *.n*
 logs/
 *\#*
-*.csv
+*~
+ENV/
