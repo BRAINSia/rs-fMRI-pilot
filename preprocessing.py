@@ -312,6 +312,7 @@ def pipeline(args):
         points = pipe.Node(interface=Function(function=createSphereExpression, input_names=['coordinates', 'radius'],
                                               output_names=['expression']), name='createSphereExpression')
         points.iterables = ('coordinates', nac)
+
         spheres = pipe.Node(interface=Calc(letters=['a']), name='afni3Dcalc_seeds')
         spheres.inputs.outputtype = outputType
         spheres.inputs.in_file_a = nacAtlasFile
@@ -319,15 +320,21 @@ def pipeline(args):
 
         preproc.connect(points, 'expression', spheres, 'expr')
 
+        seed_DataSink = pipe.Node(interface=DataSink(), name="seed_DataSink")
+        seed_DataSink.inputs.base_directory = '/paulsen/Experiments/20130417_rsfMRI_Results'
+
         # Warp seed output to detrend
         transformGrabber = pipe.Node(interface=DataGrabber(infields=['session_id'],
-                                                           outfields=['atlasToSessionTransform']),
+                                                           outfields=['atlasToSessionTransform',
+                                                                      'sessionToAtlasTransform']),
                                      name='transformGrabber')
         transformGrabber.inputs.base_directory = '/paulsen/Experiments/20130202_PREDICTHD_Results/SubjectToAtlasWarped'
-        transformGrabber.inputs.template = '*'
-        transformRegex = '%s/AtlasToSubject_Composite.h5'
-        transformGrabber.inputs.field_template = dict(atlasToSessionTransform=transformRegex)
-        transformGrabber.inputs.template_args = dict(atlasToSessionTransform=[['session_id']])
+        Transformgrabber.inputs.template = '*'
+        transformRegex = '%s/AtlasToSubject_%sComposite.h5'
+        transformGrabber.inputs.field_template = dict(atlasToSessionTransform=transformRegex,
+                                                      sessionToAtlasTransform=transformRegex)
+        transformGrabber.inputs.template_args = dict(atlasToSessionTransform=[['session_id', '']],
+                                                     sessionToAtlasTransform=[['session_id', 'Inverse']])
 
         preproc.connect(sessions, 'session_id', transformGrabber, 'session_id')
 
@@ -363,14 +370,24 @@ def pipeline(args):
         regionLogCalc.inputs.expr = 'log((1+a)/(1-a))/2'
         preproc.connect(correlate, 'out_file', regionLogCalc, 'in_file_a')
 
-        ## sinker = pipe.Node(interface=DataSink(), name="rsDataSink")
-        ## sinker.inputs.base_directory = '/paulsen/Experiments/rsFMRI-test/iowa_Results'
+        ### Move z values back into NAC atlas space
+
+        brainsFitFMRItoT1 = bFit.clone(name='brainsFitFMRItoT1')
+        warpT1toAtlas = warpT1.clone(name='warpT1toAtlas')
+
+        preproc.connect(convertT1, 'out_file', brainsFitFMRItoT1, 'fixedVolume')
+        preproc.connect(regionLogCalc, 'out_file', brainsFitFMRItoT1, 'movingVolume')
+        preproc.connect(brainsFitFMRItoT1, 'outputVolume', warpT1toAtlas, 'input_image')
+        warpT1toAtlas.inputs.reference_image = nacAtlasFile
+        preproc.connect([transformGrabber, warpT1toAtlas],
+                        [(('sessionToAtlasTransform', makeList), 'transforms')])
+
 
         ## def createStr(value):
         ##     return str(value)
 
-        ## preproc.connect(sessions, ('session_id', createStr), sinker, 'container')
-        ## preproc.connect(regionLogCalc, 'out_file', sinker, 'aparc.@logCalc')
+        preproc.connect(sessions, ('session_id', createStr), sinker, 'container')
+        preproc.connect(regionLogCalc, 'out_file', sinker, 'aparc.@logCalc')
 
     elif args.pipelineOption == 'csail':
 
@@ -429,7 +446,7 @@ def pipeline(args):
 
     preproc.write_graph()
     preproc.write_hierarchical_dotfile(dotfilename='dave.dot')
-    preproc.run()
+    #preproc.run()
 
 if __name__ == '__main__':
 
