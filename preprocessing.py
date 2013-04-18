@@ -69,17 +69,17 @@ def pipeline(args):
     # else:
     #     grabber.inputs.session_id = sessionID[0]
 
-    dicomNrrd = pipe.Node(interface=sem.DWIConvert(), name='dicomToNrrd')
-    dicomNrrd.inputs.conversionMode = 'DicomToNrrd'
-    dicomNrrd.inputs.outputDirectory = '.'  # Cache directory
-    dicomNrrd.inputs.outputVolume = 'converted.nrrd'
-    preproc.connect(grabber, 'fmri_dicom_dir', dicomNrrd, 'inputDicomDirectory')
+    dwiConverter = pipe.Node(interface=sem.DWIConvert(), name='dwiConverter')
+    dwiConverter.inputs.conversionMode = 'DicomToNrrd'
+    dwiConverter.inputs.outputDirectory = '.'  # Cache directory
+    dwiConverter.inputs.outputVolume = 'converted.nrrd'
+    preproc.connect(grabber, 'fmri_dicom_dir', dwiConverter, 'inputDicomDirectory')
 
     grep = pipe.Node(interface=Function(function=readNrrdHeader,
                                         input_names=['fileName'],
                                         output_names=['slices', 'volumes']),
                                         name='nrrdGrep')
-    preproc.connect(dicomNrrd, 'outputVolume', grep, 'fileName')
+    preproc.connect(dwiConverter, 'outputVolume', grep, 'fileName')
 
     dicom = pipe.Node(interface=Function(function=dicomRead, input_names=['infolder'],
                                          output_names=['repTime']), name='dicomRead')
