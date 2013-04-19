@@ -37,9 +37,8 @@ def readNrrdHeader(fileName):
         fID.close()
     raise IOError('Nrrd file %s has regex match for slice and volume numbers!' % fileName)
 
-def strCreate(slices, volumes, repTime):
-    """ Removed FROM_IMAGE string in favor of hard-coded alt+z2 in afni.preprocess.py """
-    return "%s %s %s" % (slices, volumes, repTime)
+def strCreate(slices, volumes, repTime, order):
+    return "%s %s %s %s" % (slices, volumes, repTime, order)
 
 def dicomRead(infolder):
     """
@@ -213,4 +212,22 @@ def createSphereExpression(coordinates, radius=5):
             expression += '({0}-{1})*({0}-{1})'.format(axes[index], abs(value))
         expression += nextChar
     return expression
+
+
+def formatFMRI(dicomDirectory):
+    """
+
+    :param dicomDirectory:
+    """
+    import subprocess
+
+    cmd = subprocess.Popen(['formatFMRI.sh', dicomDirectory], stdout=subprocess.PIPE)
+    outputs = cmd.stdout.read().split(" ")
+    sliceOrder = outputs.pop()
+    repetitionTime = outputs.pop()
+    numberOfFiles = outputs.pop()
+    numberOfSlices = outputs.pop()
+    modality = outputs.pop()
+
+    return modality, numberOfSlices, numberOfFiles, repetitionTime, sliceOrder
 
