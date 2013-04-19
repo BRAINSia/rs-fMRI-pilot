@@ -70,30 +70,22 @@ def pipeline(args):
     # else:
     #     grabber.inputs.session_id = sessionID[0]
 
-    dwiConverter = pipe.Node(interface=sem.DWIConvert(), name='dwiConverter')
-    dwiConverter.inputs.conversionMode = 'DicomToNrrd'
-    dwiConverter.inputs.outputDirectory = '.'  # Cache directory
-    dwiConverter.inputs.outputVolume = 'converted.nrrd'
-    preproc.connect(grabber, 'fmri_dicom_dir', dwiConverter, 'inputDicomDirectory')
+    formatFMRI = pipe.Node(interface=Function(function=formatFMRI,
+                                              input_names=['dicomDirectory'],
+                                              output_names=['modality', 'numberOfSlices',
+                                                            'numberOfFiles',
+                                                            'repetitionTime', 'sliceOrder'],
+                           name='formatFMRI')
+    preproc.connect(grabber, 'fmri_dicom_dir', formatFMRI, 'dicomDirectory')
 
-    grep = pipe.Node(interface=Function(function=readNrrdHeader,
-                                        input_names=['fileName'],
-                                        output_names=['slices', 'volumes']),
-                                        name='nrrdGrep')
-    preproc.connect(dwiConverter, 'outputVolume', grep, 'fileName')
-
-    dicom = pipe.Node(interface=Function(function=dicomRead, input_names=['infolder'],
-                                         output_names=['repTime']), name='dicomRead')
-    preproc.connect(grabber, 'fmri_dicom_dir', dicom, 'infolder')
-
-    #1
     to_3D_str = pipe.Node(interface=Function(function=strCreate,
                                              input_names=['slices', 'volumes', 'repTime'],
                                              output_names=['out_string']),
                           name='strCreate')
-    preproc.connect(grep, 'slices', to_3D_str, 'slices')                 #1
-    preproc.connect(grep, 'volumes', to_3D_str, 'volumes')
-    preproc.connect(dicom, 'repTime', to_3D_str, 'repTime')
+    preproc.connect(formatFMRI, 'numberOfSlices', to_3D_str, 'slices')                 #1
+    preproc.connect(formatFMRI, 'numberOfFiles', to_3D_str, 'volumes')
+    preproc.connect(formatFMRI, 'repetitionTime', to_3D_str, 'repTime')
+    preproc.connect(formatFMRI, 'sliceOrder', to_3D_str, 'order')
 
     to_3D = pipe.Node(interface=To3D(), name='afniTo3D')
     to_3D.inputs.outputtype = 'AFNI'
