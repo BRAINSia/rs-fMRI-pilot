@@ -2,6 +2,8 @@
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
 
+### TODO: Modify virtualenv to include formatFMRI.sh
+
 import argparse
 import os
 import sys
@@ -12,7 +14,7 @@ from nipype.interfaces.ants.resampling import ApplyTransforms
 from nipype.interfaces.afni.preprocess import *
 from nipype.interfaces.freesurfer.preprocess import *
 from nipype.interfaces.io import DataSink, DataGrabber
-from nipype.interfaces.utility import Function, IdentityInterface
+from nipype.interfaces.utility import Function, IdentityInterface, Rename
 from nipype.interfaces.utility import Merge as Merger
 import nipype.pipeline.engine as pipe
 import numpy
@@ -64,27 +66,25 @@ def pipeline(args):
                                                    'POSTERIOR_CSF_TOTAL.nii.gz']],
                                         whmFile=[['session_id', 'ACCUMULATED_POSTERIORS',
                                                   'POSTERIOR_WM_TOTAL.nii.gz']])
-    # if len(sessionID) > 1:
     preproc.connect(sessions, 'session_id', grabber, 'session_id')
-    # else:
-    #     grabber.inputs.session_id = sessionID[0]
 
-    formatFMRI = pipe.Node(interface=Function(function=formatFMRI,
-                                              input_names=['dicomDirectory'],
-                                              output_names=['modality', 'numberOfSlices',
-                                                            'numberOfFiles',
-                                                            'repetitionTime', 'sliceOrder'],
-                           name='formatFMRI')
-    preproc.connect(grabber, 'fmri_dicom_dir', formatFMRI, 'dicomDirectory')
+    formatFMRINode = pipe.Node(interface=Function(function=formatFMRI,
+                                                  input_names=['dicomDirectory'],
+                                                  output_names=['modality', 'numberOfSlices',
+                                                                'numberOfFiles',
+                                                                'repetitionTime', 'sliceOrder']),
+                               name='formatFMRINode')
+    preproc.connect(grabber, 'fmri_dicom_dir', formatFMRINode, 'dicomDirectory')
 
     to_3D_str = pipe.Node(interface=Function(function=strCreate,
-                                             input_names=['slices', 'volumes', 'repTime'],
+                                             input_names=['time', 'slices', 'volumes', 'repTime', 'order'],
                                              output_names=['out_string']),
                           name='strCreate')
-    preproc.connect(formatFMRI, 'numberOfSlices', to_3D_str, 'slices')                 #1
-    preproc.connect(formatFMRI, 'numberOfFiles', to_3D_str, 'volumes')
-    preproc.connect(formatFMRI, 'repetitionTime', to_3D_str, 'repTime')
-    preproc.connect(formatFMRI, 'sliceOrder', to_3D_str, 'order')
+    to_3D_str.inputs.time = 'zt'
+    preproc.connect(formatFMRINode, 'numberOfSlices', to_3D_str, 'slices')                 #1
+    preproc.connect(formatFMRINode, 'numberOfFiles', to_3D_str, 'volumes')
+    preproc.connect(formatFMRINode, 'repetitionTime', to_3D_str, 'repTime')
+    preproc.connect(formatFMRINode, 'sliceOrder', to_3D_str, 'order')
 
     to_3D = pipe.Node(interface=To3D(), name='afniTo3D')
     to_3D.inputs.outputtype = 'AFNI'
@@ -112,7 +112,7 @@ def pipeline(args):
     despike.inputs.start = skipCount
     despike.inputs.ignore = skipCount
     preproc.connect(refit, 'out_file', despike, 'in_file')
-    preproc.connect(grep, ('volumes', strToIntMinusOne), despike, 'end')
+    preproc.connect(formatFMRINode, ('numberOfFiles', strToIntMinusOne), despike, 'end')
 
     #3
     volreg = pipe.Node(interface=Volreg(), name='afni3DvolReg')
@@ -204,20 +204,20 @@ def pipeline(args):
     preproc.connect(tstat, 'out_file', bFit, 'fixedVolume')
 
     ### preprocessing_part2.sh
-    warpT1 = pipe.Node(interface=ApplyTransforms(), iterfield=['input_image'],
-                          name='antsApplyTransformsT1')
-    warpT1.inputs.interpolation='Linear' # Validation test value: NearestNeighbor
-    preproc.connect(convertT1, 'out_file', warpT1, 'input_image') # connected to brain.nii NOT brain.mgz
-    preproc.connect(tstat, 'out_file', warpT1, 'reference_image')
-    preproc.connect([(bFit, warpT1, [(('outputTransform', makeList), 'transforms')])])
+    warpT1ToFMRI = pipe.Node(interface=ApplyTransforms(), iterfield=['input_image'],
+                             name='antsApplyTransformsT1')
+    warpT1ToFMRI.inputs.interpolation='Linear' # Validation test value: NearestNeighbor
+    preproc.connect(convertT1, 'out_file', warpT1ToFMRI, 'input_image') # connected to brain.nii NOT brain.mgz
+    preproc.connect(tstat, 'out_file', warpT1ToFMRI, 'reference_image')
+    preproc.connect([(bFit, warpT1ToFMRI, [(('outputTransform', makeList), 'transforms')])])
 
-    # warpT1 = warpNN.clone('antsApplyTransformT1')
-    warpCSF = warpT1.clone('antsApplyTransformCSF')
+    # warpT1ToFMRI = warpNN.clone('antsApplyTransformT1')
+    warpCSF = warpT1ToFMRI.clone('antsApplyTransformCSF')
     preproc.connect(grabber, 'csfFile', warpCSF, 'input_image')
     preproc.connect(tstat, 'out_file', warpCSF, 'reference_image')
     preproc.connect([(bFit, warpCSF, [(('outputTransform', makeList), 'transforms')])])
 
-    warpWHM = warpT1.clone('antsApplyTransformWHM')
+    warpWHM = warpT1ToFMRI.clone('antsApplyTransformWHM')
     preproc.connect(grabber, 'whmFile', warpWHM, 'input_image')
     preproc.connect(tstat, 'out_file', warpWHM, 'reference_image')
     preproc.connect([(bFit, warpWHM, [(('outputTransform', makeList), 'transforms')])])
@@ -301,9 +301,14 @@ def pipeline(args):
         ### Create seed points
         talairach, nac = getAtlasPoints('seeds.txt')
         nacAtlasFile = "/IPLlinux/ipldev/scratch/welchdm/bld/rs-fMRI/BSA/ReferenceAtlas-build/Atlas/Atlas_20130106/template_t1.nii.gz"
+        seedsIdentity = pipe.Node(interface=IdentityInterface(fields=['seed']),
+                                  name='seedsIdentity')
+        seedsIdentity.iterables = ('seed', nac)
+
         points = pipe.Node(interface=Function(function=createSphereExpression, input_names=['coordinates', 'radius'],
                                               output_names=['expression']), name='createSphereExpression')
-        points.iterables = ('coordinates', nac)
+
+        preproc.connect(seedsIdentity, 'seed', points, 'coordinates')
 
         spheres = pipe.Node(interface=Calc(letters=['a']), name='afni3Dcalc_seeds')
         spheres.inputs.outputtype = outputType
@@ -321,7 +326,7 @@ def pipeline(args):
                                                                       'sessionToAtlasTransform']),
                                      name='transformGrabber')
         transformGrabber.inputs.base_directory = '/paulsen/Experiments/20130202_PREDICTHD_Results/SubjectToAtlasWarped'
-        Transformgrabber.inputs.template = '*'
+        transformGrabber.inputs.template = '*'
         transformRegex = '%s/AtlasToSubject_%sComposite.h5'
         transformGrabber.inputs.field_template = dict(atlasToSessionTransform=transformRegex,
                                                       sessionToAtlasTransform=transformRegex)
@@ -334,7 +339,7 @@ def pipeline(args):
         nacToFMRI.inputs.interpolation = 'Linear'
 
         preproc.connect(spheres, 'out_file', nacToFMRI, 'input_image')
-        preproc.connect(warpT1, 'output_image', nacToFMRI, 'reference_image')
+        preproc.connect(warpT1ToFMRI, 'output_image', nacToFMRI, 'reference_image')
 
         # Apply two transforms: NAC -> T1 -> fMRI
         concatTransformsNode = pipe.Node(interface=Function(function=concatTransforms,
@@ -363,23 +368,33 @@ def pipeline(args):
         preproc.connect(correlate, 'out_file', regionLogCalc, 'in_file_a')
 
         ### Move z values back into NAC atlas space
+        invertConcatTransformsNode = concatTransformsNode.clone(name='invertConcatTransforms')
+        preproc.connect(bFit, 'outputTransform', invertConcatTransformsNode, 'transform2')
+        preproc.connect(transformGrabber, 'sessionToAtlasTransform', invertConcatTransformsNode, 'transform1')
 
-        brainsFitFMRItoT1 = bFit.clone(name='brainsFitFMRItoT1')
-        warpT1toAtlas = warpT1.clone(name='warpT1toAtlas')
+        fmriToNAC = nacToFMRI.clone(name='fmriToNac')
+        fmriToNAC.inputs.invert_transform_flags = [False, True]
+        fmriToNAC.inputs.reference_image = nacAtlasFile
+        preproc.connect(regionLogCalc, 'out_file', fmriToNAC, 'input_image')
+        preproc.connect(invertConcatTransformsNode, 'transformList', fmriToNAC, 'transforms')
 
-        preproc.connect(convertT1, 'out_file', brainsFitFMRItoT1, 'fixedVolume')
-        preproc.connect(regionLogCalc, 'out_file', brainsFitFMRItoT1, 'movingVolume')
-        preproc.connect(brainsFitFMRItoT1, 'outputVolume', warpT1toAtlas, 'input_image')
-        warpT1toAtlas.inputs.reference_image = nacAtlasFile
-        preproc.connect([transformGrabber, warpT1toAtlas],
-                        [(('sessionToAtlasTransform', makeList), 'transforms')])
+        # renameZScores = pipe.Node(interface=Rename(format_string="%(session)s_%(coords)s_zscores"),
+        #                           name='renameZScores')
+        # renameZScores.inputs.keep_ext = True
+        # preproc.connect(sessions, 'session_id', renameZScores, 'session')
+        # preproc.connect(seedsIdentity, 'seed', renameZScores, 'coords')
+        # preproc.connect(fmriToNAC, 'output_image', renameZScores, 'in_file')
 
+        sinker = pipe.Node(interface=DataSink(), name="seeds_DataSink")
+        sinker.inputs.base_directory = os.path.join(preproc.base_dir, preproc.name + '_Results')
+        sessionDir = '_session_id_'
+        coordsDir = '_coordinates_'
+        sinker.inputs.regexp_substitutions = [ ('_session_id_[\w]+/', sessionID[0]), ### TODO: link to sessions iterable
+                                             (fmriToNAC.name, ''),
+                                             (coordsDir, '')]
+        # preproc.connect(renameZScores, 'out_file', sinker, 'sessions')
 
-        ## def createStr(value):
-        ##     return str(value)
-
-        preproc.connect(sessions, ('session_id', createStr), sinker, 'container')
-        preproc.connect(regionLogCalc, 'out_file', sinker, 'aparc.@logCalc')
+        preproc.connect(fmriToNAC, 'output_image', sinker, 'sessions')
 
     elif args.pipelineOption == 'csail':
 
@@ -436,9 +451,9 @@ def pipeline(args):
         preproc.connect(writeFile2, 'label_file', sinker, 'aparca2009s.@label')
         preproc.connect(writeFile2, 'raw_file', sinker, 'aparca2009s.@raw')
 
-    preproc.write_graph()
-    preproc.write_hierarchical_dotfile(dotfilename='dave.dot')
-    #preproc.run()
+    # preproc.write_graph()
+    # preproc.write_hierarchical_dotfile(dotfilename='dave.dot')
+    preproc.run()
 
 if __name__ == '__main__':
 

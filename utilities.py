@@ -37,8 +37,11 @@ def readNrrdHeader(fileName):
         fID.close()
     raise IOError('Nrrd file %s has regex match for slice and volume numbers!' % fileName)
 
-def strCreate(slices, volumes, repTime, order):
-    return "%s %s %s %s" % (slices, volumes, repTime, order)
+def strCreate(time, slices, volumes, repTime, order):
+    """
+    Create a funcparams string for To3D()
+    """
+    return "%s %s %s %s %s" % (time, slices, volumes, repTime, order.strip())
 
 def dicomRead(infolder):
     """
