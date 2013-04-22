@@ -1,12 +1,12 @@
 from csv import reader, DictReader
 
 class FiducialReader(DictReader):
-    def __init__(self, f, fieldnames=None, restkey=None, restval=None,
+    def __init__(self, filename, fieldnames=None, restkey=None, restval=None,
                  dialect='excel', commentchar='#', *args, **kwds):
         self._fieldnames = fieldnames   # list of keys for the dict
         self.restkey = restkey          # key to catch long rows
         self.restval = restval          # default value for short rows
-        self.reader = reader(f, dialect, *args, **kwds)
+        self.reader = reader(filename, dialect, *args, **kwds)
         self.dialect = dialect
         self.line_num = 0
         self.comment_line_num = -1
@@ -30,10 +30,9 @@ class FiducialReader(DictReader):
         self._fieldnames = value
 
     def next(self):
-        ### Skip header
-        # if self.line_num == 0:
-        #    # Used only for its side effect.
-        #    self.fieldnames
+        if self.line_num == 0:
+           # Used only for its side effect.
+           self.fieldnames
         row = self.reader.next()
         assert self.comment_line_num < self.line_num, 'First line MUST be a commented line!'
         temp = []
