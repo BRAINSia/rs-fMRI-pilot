@@ -14,7 +14,7 @@ from nipype.interfaces.ants.resampling import ApplyTransforms
 from nipype.interfaces.afni.preprocess import *
 from nipype.interfaces.freesurfer.preprocess import *
 from nipype.interfaces.io import DataSink, DataGrabber
-from nipype.interfaces.utility import Function, IdentityInterface, Rename
+from nipype.interfaces.utility import Function, IdentityInterface, Rename, Select
 from nipype.interfaces.utility import Merge as Merger
 import nipype.pipeline.engine as pipe
 import numpy
@@ -33,10 +33,15 @@ def pipeline(args):
         preproc.name += "_csail"
     preproc.base_dir = os.getcwd()
 
-    site = 'FMRI_HD_024'
-    ## preprocessing_Nov1_update.sh
+    # fmri_DataSink = pipe.Node(interface=DataSink(), name="fmri_DataSink")
+    # fmri_DataSink.inputs.base_directory = os.path.join(preproc.base_dir, 'results', 'fmri') # '/paulsen/Experiments/20130417_rsfMRI_Results'
+    # fmri_DataSink.inputs.substitutions = [('to_3D_out+orig', 'to3D')]
+    # fmri_DataSink.inputs.parameterization = False
+
     sessions = pipe.Node(interface=IdentityInterface(fields=['session_id']), name='sessionIDs')
     sessions.iterables = ('session_id', sessionID)
+
+    preproc.connect(sessions, 'session_id', fmri_DataSink, 'container')
 
     grabber = pipe.Node(interface=DataGrabber(infields=['session_id'],
                                               outfields=['fmri_dicom_dir', 't1_File',
@@ -44,6 +49,7 @@ def pipeline(args):
                                                          'whmFile']), name='dataGrabber')
     grabber.inputs.base_directory = '/paulsen'
     grabber.inputs.template = '*'
+    site = 'FMRI_HD_024' ### HACK
     fmriRegex = 'MRx/{site}/*/%s/%s/%s/*'.format(site=site)
     fS_Regex = 'Experiments/20120722_JOY_DWI/{site}/*/%s/%s/%s_*_%s_FS/%s/%s'.format(site=site)
     probRegex = 'Experiments/20120801.SubjectOrganized_Results/{site}/*/%s/%s/%s'.format(site=site)
@@ -94,6 +100,12 @@ def pipeline(args):
     to_3D.inputs.prefix = 'to_3D_out'
     preproc.connect(grabber, 'fmri_dicom_dir', to_3D, 'infolder')
     preproc.connect(to_3D_str, 'out_string', to_3D, 'funcparams')
+
+    # renameTo3D = pipe.Node(Rename(format_string='%(session)s_to3D'), name='renameTo3D')
+    # renameTo3D.inputs.keep_ext = True
+    # preproc.connect(to_3D, 'out_file', renameTo3D, 'in_file')
+    # preproc.connect(sessions, 'session_id', renameTo3D, 'session')
+    # preproc.connect(renameTo3D, 'out_file', fmri_DataSink, '@To3D')
 
     #1a
     refit = pipe.Node(interface=Refit(), name='afni3Drefit')
@@ -299,27 +311,46 @@ def pipeline(args):
     preproc.connect(deconvolve, 'out_errts', detrend, 'in_file')          #13
 
     if args.pipelineOption == 'iowa':
-        ### Create seed points
-        talairach, nac = getAtlasPoints('seeds.txt')
         nacAtlasFile = "/IPLlinux/ipldev/scratch/welchdm/bld/rs-fMRI/BSA/ReferenceAtlas-build/Atlas/Atlas_20130106/template_t1.nii.gz"
-        seedsIdentity = pipe.Node(interface=IdentityInterface(fields=['seed']),
+        ### Create seed points
+        labels, seeds = getAtlasPoints('seeds.fcsv')
+
+        seedsIdentity = pipe.Node(interface=IdentityInterface(fields=['index']),
                                   name='seedsIdentity')
-        seedsIdentity.iterables = ('seed', nac)
+        seedsIdentity.iterables = ('index', range(len(labels)))
 
-        points = pipe.Node(interface=Function(function=createSphereExpression, input_names=['coordinates', 'radius'],
-                                              output_names=['expression']), name='createSphereExpression')
+        selectSeed = pipe.Node(interface=Select(), name='selectSeed')
+        selectSeed.inputs.inlist = seeds
+        preproc.connect(seedsIdentity, 'index', selectSeed, 'index')
 
-        preproc.connect(seedsIdentity, 'seed', points, 'coordinates')
+        selectLabel = pipe.Node(interface=Select(), name='selectLabel')
+        selectLabel.inputs.inlist = labels
+        preproc.connect(seedsIdentity, 'index', selectLabel, 'index')
 
-        spheres = pipe.Node(interface=Calc(letters=['a']), name='afni3Dcalc_seeds')
+        points = pipe.Node(interface=Function(function=createSphereExpression,
+                                              input_names=['coordinates', 'radius'],
+                                              output_names=['expression']),
+                           name='createSphereExpression')
+        preproc.connect(selectSeed, 'out', points, 'coordinates')
+
+        spheres = pipe.Node(interface=Calc(letters=['a']),
+                            name='afni3Dcalc_seeds')
         spheres.inputs.outputtype = outputType
         spheres.inputs.in_file_a = nacAtlasFile
         spheres.inputs.args = '-nscale'
 
         preproc.connect(points, 'expression', spheres, 'expr')
 
-        seed_DataSink = pipe.Node(interface=DataSink(), name="seed_DataSink")
-        seed_DataSink.inputs.base_directory = '/paulsen/Experiments/20130417_rsfMRI_Results'
+        renameMasks = pipe.Node(interface=Rename(format_string='%(label)s_mask'), name='renameMasksAtlas')
+        renameMasks.inputs.keep_ext = True
+        preproc.connect(selectLabel, 'out', renameMasks, 'label')
+        preproc.connect(spheres, 'out_file', renameMasks, 'in_file')
+
+        atlas_DataSink = pipe.Node(interface=DataSink(), name="atlas_DataSink")
+        atlas_DataSink.inputs.base_directory = preproc.base_dir # '/paulsen/Experiments/20130417_rsfMRI_Results'
+        atlas_DataSink.inputs.container = 'results'
+        atlas_DataSink.inputs.parameterization = False
+        preproc.connect(renameMasks, 'out_file', atlas_DataSink, 'atlas')
 
         # Warp seed output to detrend
         transformGrabber = pipe.Node(interface=DataGrabber(infields=['session_id'],
@@ -335,13 +366,6 @@ def pipeline(args):
                                                      sessionToAtlasTransform=[['session_id', 'Inverse']])
 
         preproc.connect(sessions, 'session_id', transformGrabber, 'session_id')
-
-        nacToFMRI = pipe.Node(interface=ApplyTransforms(), name="antsApplyTransformsNAC")
-        nacToFMRI.inputs.interpolation = 'Linear'
-
-        preproc.connect(spheres, 'out_file', nacToFMRI, 'input_image')
-        preproc.connect(warpT1ToFMRI, 'output_image', nacToFMRI, 'reference_image')
-
         # Apply two transforms: NAC -> T1 -> fMRI
         concatTransformsNode = pipe.Node(interface=Function(function=concatTransforms,
                                                             input_names=['transform1', 'transform2'],
@@ -349,7 +373,26 @@ def pipeline(args):
                                          name='concatTransforms')
         preproc.connect(bFit, 'outputTransform', concatTransformsNode, 'transform1')
         preproc.connect(transformGrabber, 'atlasToSessionTransform', concatTransformsNode, 'transform2')
+
+        nacToFMRI = pipe.Node(interface=ApplyTransforms(), name="antsApplyTransformsNAC")
+        nacToFMRI.inputs.interpolation = 'Linear'
+        preproc.connect(spheres, 'out_file', nacToFMRI, 'input_image')
+        preproc.connect(warpT1ToFMRI, 'output_image', nacToFMRI, 'reference_image')
         preproc.connect(concatTransformsNode, 'transformList', nacToFMRI, 'transforms')
+
+        renameMasks2 = pipe.Node(interface=Rename(format_string='%(session)s_%(label)s_mask'), name='renameMasksFMRI')
+        renameMasks2.inputs.keep_ext = True
+        preproc.connect(selectLabel, 'out', renameMasks2, 'label')
+        preproc.connect(sessions, 'session_id', renameMasks2, 'session')
+        preproc.connect(nacToFMRI, 'output_image', renameMasks2, 'in_file')
+
+        # Labels are iterated over, so we need a seperate datasink to avoid overwriting any preprocessing
+        # results when the labels are iterated (e.g. To3d output)
+        fmri_label_DataSink = fmri_DataSink.clone(name='fmri_label_DataSink')
+        fmri_label_DataSink.inputs.base_directory = os.path.join(preproc.base_dir, 'results', 'fmri') # '/paulsen/Experiments/20130417_rsfMRI_Results'
+        fmri_label_DataSink.inputs.parameterization = False
+        preproc.connect(sessions, 'session_id', fmri_label_DataSink, 'container')
+        preproc.connect(renameMasks2, 'out_file', fmri_label_DataSink, 'fmri.@masks')
 
         roiMedian = pipe.Node(interface=Maskave(), name='afni_roiMedian')
         roiMedian.inputs.outputtype = 'AFNI_1D'
@@ -368,6 +411,13 @@ def pipeline(args):
         regionLogCalc.inputs.expr = 'log((1+a)/(1-a))/2'
         preproc.connect(correlate, 'out_file', regionLogCalc, 'in_file_a')
 
+        renameZscore = pipe.Node(interface=Rename(format_string="%(session)s_%(label)s_zscore"), name='renameZscore')
+        renameZscore.inputs.keep_ext = True
+        preproc.connect(sessions, 'session_id', renameZscore, 'session')
+        preproc.connect(selectLabel, 'out', renameZscore, 'label')
+        preproc.connect(regionLogCalc, 'out_file', renameZscore, 'in_file')
+        preproc.connect(renameZscore, 'out_file', fmri_label_DataSink, 'fmri.@zscore')
+
         ### Move z values back into NAC atlas space
         invertConcatTransformsNode = concatTransformsNode.clone(name='invertConcatTransforms')
         preproc.connect(bFit, 'outputTransform', invertConcatTransformsNode, 'transform2')
@@ -379,23 +429,12 @@ def pipeline(args):
         preproc.connect(regionLogCalc, 'out_file', fmriToNAC, 'input_image')
         preproc.connect(invertConcatTransformsNode, 'transformList', fmriToNAC, 'transforms')
 
-        # renameZScores = pipe.Node(interface=Rename(format_string="%(session)s_%(coords)s_zscores"),
-        #                           name='renameZScores')
-        # renameZScores.inputs.keep_ext = True
-        # preproc.connect(sessions, 'session_id', renameZScores, 'session')
-        # preproc.connect(seedsIdentity, 'seed', renameZScores, 'coords')
-        # preproc.connect(fmriToNAC, 'output_image', renameZScores, 'in_file')
-
-        sinker = pipe.Node(interface=DataSink(), name="seeds_DataSink")
-        sinker.inputs.base_directory = os.path.join(preproc.base_dir, preproc.name + '_Results')
-        sessionDir = '_session_id_'
-        coordsDir = '_coordinates_'
-        sinker.inputs.regexp_substitutions = [ ('_session_id_[\w]+/', sessionID[0]), ### TODO: link to sessions iterable
-                                             (fmriToNAC.name, ''),
-                                             (coordsDir, '')]
-        # preproc.connect(renameZScores, 'out_file', sinker, 'sessions')
-
-        preproc.connect(fmriToNAC, 'output_image', sinker, 'sessions')
+        renameZscore2 = pipe.Node(interface=Rename(format_string="%(session)s_%(label)s_result"), name='renameZscore2')
+        renameZscore2.inputs.keep_ext = True
+        preproc.connect(sessions, 'session_id', renameZscore2, 'session')
+        preproc.connect(selectLabel, 'out', renameZscore2, 'label')
+        preproc.connect(fmriToNAC, 'output_image', renameZscore2, 'in_file')
+        preproc.connect(renameZscore, 'out_file', atlas_DataSink, 'atlas.@zscore')
 
     elif args.pipelineOption == 'csail':
 
@@ -433,7 +472,6 @@ def pipeline(args):
         writeFile2 = writeFile1.clone(name='writeMatFile2')
         preproc.connect(roiStats2, 'stats', writeFile2, 'in_file')
 
-        ###TODO: DataSink
         sinker = pipe.Node(interface=DataSink(), name="rsDataSink")
         sinker.inputs.base_directory = '/paulsen/Experiments/rsFMRI-test/csail_Results'
         find_matlab = 'errts_Decon+orig_dtroiStat'
@@ -452,9 +490,9 @@ def pipeline(args):
         preproc.connect(writeFile2, 'label_file', sinker, 'aparca2009s.@label')
         preproc.connect(writeFile2, 'raw_file', sinker, 'aparca2009s.@raw')
 
-    # preproc.write_graph()
+    preproc.write_graph()
     # preproc.write_hierarchical_dotfile(dotfilename='dave.dot')
-    preproc.run()
+    preproc.run(plugin='MultiProc', plugin_args={'n_proc':12})
 
 if __name__ == '__main__':
 
