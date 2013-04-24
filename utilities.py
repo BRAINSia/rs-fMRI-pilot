@@ -164,19 +164,67 @@ def getAtlasPoints(filename):
     """ Assumes file with text header:
 
     """
-    talairach = []
-    nac = []
-    with open(filename, 'r') as fid:
-        count = 0
-        for line in fid.readlines():
-            if count > 0:
-                x1, y1, z1, x2, y2, z2 = line.split(',')
-                talairach.append((float(x1), float(y1), float(z1)))
-                nac.append((float(x2), float(y2), float(z2)))
+    from csv import reader, DictReader
+
+    class FiducialReader(DictReader):
+        def __init__(self, fid, commentchar='#', *args, **kwds):
+            if issubclass(DictReader, object):
+                super(DictReader, self).__init__(fid, *args, **kwds)
             else:
-                # Ignore header line
-                count += 1
-    return talairach, nac
+                DictReader.__init__(self, fid, *args, **kwds)
+            self.commentchar = commentchar
+            self.leadingfield = self.commentchar + 'label'
+
+        def __iter__(self):
+            return self
+
+        @property
+        def fieldnames(self):
+            while self._fieldnames is None or self._fieldnames[0] != self.leadingfield:
+                try:
+                    self._fieldnames = self.reader.next()
+                except StopIteration:
+                    pass
+            self.line_num = self.reader.line_num
+            return self._fieldnames
+
+        @fieldnames.setter
+        def fieldnames(self, value):
+            self._fieldnames = values
+
+        def next(self):
+            if self.line_num == 0:
+               # Used only for its side effect.
+               self.fieldnames
+            row = self.reader.next()
+            self.line_num = self.reader.line_num
+            # unlike the basic reader, we prefer not to return blanks,
+            # because we will typically wind up with a dict full of None
+            # values
+            # also, if the line begins with a comment character we
+            # shouldn't return it either
+            while row == [] or row[0][0] == self.commentchar:
+                row = self.reader.next()
+            d = dict(zip(self.fieldnames, row))
+            lf = len(self.fieldnames)
+            lr = len(row)
+            if lf < lr:
+                d[self.restkey] = row[lf:]
+            elif lf > lr:
+                for key in self.fieldnames[lr:]:
+                    d[key] = self.restval
+            return d
+
+
+    with open(filename, 'r') as fid:
+        fcsvreader = FiducialReader(fid)
+        labels = []
+        nac = []
+        for line in fcsvreader:
+            labels.append(line['#label'])
+            nac.append((float(line['x']), float(line['y']), float(line['z'])))
+    return labels, nac
+
 
 def createSphereExpression(coordinates, radius=5):
     """
@@ -192,7 +240,7 @@ def createSphereExpression(coordinates, radius=5):
 
     Test: (-)
     """
-    assert isinstance(coordinates, tuple), "Coordinates MUST be a tuple"
+    coordinates = tuple(coordinates)
     expression = 'step(%d-' % radius**2
     axes = ('x', 'y', 'z')
     for index in range(len(axes)):

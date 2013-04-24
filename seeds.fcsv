@@ -7,13 +7,13 @@
 #selectedColor = 1,0,0
 #type = Sphere3D
 #label,x,y,z,sel,vis
-medial orbitofrontal cortex,0,42,-16,1,1
-left ventrolateral PFC,-39,30,-4,0,1
-right ventrolateral PFC,39,30,-4,0,1
-left dorsolateral PFC,-40,34,15,0,1
-right dorsolateral PFC,40,34,15,0,1
-left premotor,-38,5,40,0,1
-right premotor,38,5,40,0,1
+mOFC,0,-42,-16,1,1
+lVLPFC,-39,-30,-4,0,1
+rVLPFC,39,-30,-4,0,1
+lDLPFC,-40,-34,15,0,1
+rDLPFC,40,-34,15,0,1
+lPM,-38,-5,40,0,1
+rPM,38,-5,40,0,1
 
 ## talairach_x,talairach_y,talairach_z,NAC_x,NAC_y,NAC_z
 ## 0,48,-8,0,-42,-16
