@@ -124,7 +124,7 @@ def pipeline(args):
     preproc.connect(to_3D, 'out_file', refit, 'in_file')
 
     #2
-    skipCount = 4
+    skipCount = 6                                                      #Note. Jatin changed this from 4 to 6 on April 19, 2013. temporary until final.
     def strToIntMinusOne(string):
         return int(string) - 1
 
@@ -166,13 +166,13 @@ def pipeline(args):
     #5
     merge = pipe.Node(interface=Merge(), name='afni3Dmerge')
     merge.inputs.outputtype = outputType
-    merge.inputs.blurfwhm = 6
+    merge.inputs.blurfwhm = 10
     merge.inputs.doall = True
     merge.inputs.args = '-1noneg -1clip 100' # TODO
     # TODO: implement
     # merge.inputs.onenoneg = True
     # merge.inputs.oneclip = 100
-    preproc.connect(zpad, 'out_file', merge, 'in_files')                  #5 ### NOTE: ONLY ONE FILE TO in_files
+    preproc.connect(zpad, 'out_file', merge, 'in_files')                  #5 ### NOTE: ONLY ONE FILE TO in_files. JV changed blurr to 10 temporarily on april 19, 2013.
 
     #6
     automask = pipe.Node(interface=Automask(), name='afni3Dautomask')
