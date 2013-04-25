@@ -7,13 +7,13 @@
 #selectedColor = 1,0,0
 #type = Sphere3D
 #label,x,y,z,sel,vis
-mOFC,0,-42,-16,1,1
-lVLPFC,-39,-30,-4,0,1
-rVLPFC,39,-30,-4,0,1
-lDLPFC,-40,-34,15,0,1
-rDLPFC,40,-34,15,0,1
-lPM,-38,-5,40,0,1
-rPM,38,-5,40,0,1
+OFC_m,0,-42,-16,1,1
+VLPFC_l,-39,-30,-4,0,1
+VLPFC_r,39,-30,-4,0,1
+DLPFC_l,-40,-34,15,0,1
+DLPFC_r,40,-34,15,0,1
+PM_l,-38,-5,40,0,1
+PM_r,38,-5,40,0,1
 
 ## talairach_x,talairach_y,talairach_z,NAC_x,NAC_y,NAC_z
 ## 0,48,-8,0,-42,-16
