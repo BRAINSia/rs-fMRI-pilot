@@ -9,7 +9,8 @@ descr=`dicom_hdr $eximage | grep "Series Description" | awk -F "/" '{print $5}'`
 #   repetition time
 tr=`dicom_hdr $eximage | grep Repetition | awk -F "/" '{print $5}'`
 # Number of slices in each timepoint
-nSlices=`strings $eximage | grep "sGroupArray.anMember\[" | wc | awk '{print $1}'`
+# Expanded grep search avoids error when sGroupArray.anMember line is incomplete and should be ignored
+nSlices=`strings $eximage | grep "sGroupArray.anMember\[[0-9]\+\][\t ]\+= [-0-9]\+" | wc | awk '{print $1}'`
 # Sort the dicom series
 images=`ls $dicomDir/*dcm | sort -t. -k 5 -n`
 # Count the number of dicom files
