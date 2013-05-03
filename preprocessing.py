@@ -35,7 +35,7 @@ def pipeline(args):
 
     fmri_DataSink = pipe.Node(interface=DataSink(), name="fmri_DataSink")
     ### HACK: Remove node from pipeline until Nipype/AFNI file copy issue is resolved
-    # fmri_DataSink.inputs.base_directory = os.path.join(preproc.base_dir, 'results', 'fmri') # '/paulsen/Experiments/20130417_rsfMRI_Results'
+    # fmri_DataSink.inputs.base_directory = os.path.join(preproc.base_dir, 'Results', 'fmri') # '/paulsen/Experiments/20130417_rsfMRI_Results'
     # fmri_DataSink.inputs.substitutions = [('to_3D_out+orig', 'to3D')]
     # fmri_DataSink.inputs.parameterization = False
     ### END HACK
@@ -56,17 +56,14 @@ def pipeline(args):
     site = 'FMRI_HD_024' ### HACK: site hardcoded
     fmriRegex = 'MRx/{site}/*/%s/%s/%s/*'.format(site=site)
     fS_Regex = 'Experiments/20120722_JOY_DWI/{site}/*/%s/%s/%s_*_%s_FS/%s/%s'.format(site=site)
-    probRegex = 'Experiments/20120801.SubjectOrganized_Results/{site}/*/%s/%s/%s'.format(site=site)
+    probRegex = 'Experiments/20130202_PREDICTHD_Results/{site}/*/%s/%s/%s'.format(site=site)
     grabber.inputs.field_template = dict(fmri_dicom_dir=fmriRegex,
-                                         t1_File=fS_Regex,
                                          faparc_File=fS_Regex,
                                          faparc2009_File=fS_Regex,
                                          csfFile=probRegex,
                                          whmFile=probRegex)
     grabber.inputs.template_args = dict(fmri_dicom_dir=[['session_id', 'ANONRAW',
                                                          'FMRI_RestingStateConnectivity']],
-                                        t1_File=[['session_id', '10_AUTO.NN3Tv20110419',
-                                                  'JOY_v51_2011', 'session_id', 'mri', 'brain.mgz']],
                                         faparc_File=[['session_id', '10_AUTO.NN3Tv20110419',
                                                   'JOY_v51_2011', 'session_id', 'mri_nifti',
                                                   'aparc+aseg.nii.gz']],
@@ -77,6 +74,16 @@ def pipeline(args):
                                                    'POSTERIOR_CSF_TOTAL.nii.gz']],
                                         whmFile=[['session_id', 'ACCUMULATED_POSTERIORS',
                                                   'POSTERIOR_WM_TOTAL.nii.gz']])
+    if args.pipelineOption == 'iowa':
+        # Use T1 in subject space (AutoWorkup)
+        grabber.inputs.field_template['t1_File'] = probRegex
+        grabber.inputs.template_args['t1_File'] = [['session_id', 'TissueClassify',
+                                                    't1_average_BRAINSABC.nii.gz']]
+    elif args.pipelineOption == 'csail':
+        # Use T1 in FreeSurfer space
+        grabber.inputs.field_template['t1_File'] = fS_Regex
+        grabber.inputs.template_args['t1_File'] = [['session_id', '10_AUTO.NN3Tv20110419',
+                                                    'JOY_v51_2011', 'session_id', 'mri', 'brain.mgz']]
     preproc.connect(sessions, 'session_id', grabber, 'session_id')
 
     formatFMRINode = pipe.Node(interface=Function(function=formatFMRI,
@@ -203,18 +210,6 @@ def pipeline(args):
     preproc.connect(calc, 'out_file', fourier, 'in_file')
 
     #9
-    converter = pipe.Node(interface=MRIConvert(), name='freesurferMRIconvert')
-    converter.inputs.out_type = fOutputType
-    converter.inputs.in_type = 'mgz'
-    converter.inputs.force_ras = True
-    converter.inputs.out_datatype = 'short'
-
-    convertT1 = converter.clone('T1Converter')
-    preproc.connect(grabber, 't1_File', convertT1, 'in_file')
-
-    convertF1 = converter.clone('F1Converter')
-    convertF2 = converter.clone('F2Converter')
-
     bFit = pipe.Node(interface=sem.BRAINSFit(), name='brainsFit')
     bFit.inputs.initializeTransformMode = 'useCenterOfHeadAlign'
     bFit.inputs.maskProcessingMode = 'ROIAUTO'
@@ -223,15 +218,28 @@ def pipeline(args):
     bFit.inputs.costMetric = 'MMI' # (default)
     bFit.inputs.numberOfSamples = 100000 # (default)
     bFit.inputs.outputTransform = True
-    preproc.connect(convertT1, 'out_file', bFit, 'movingVolume')
     preproc.connect(tstat, 'out_file', bFit, 'fixedVolume')
 
     ### preprocessing_part2.sh
     warpT1ToFMRI = pipe.Node(interface=ApplyTransforms(), iterfield=['input_image'],
                              name='antsApplyTransformsT1')
     warpT1ToFMRI.inputs.interpolation='Linear' # Validation test value: NearestNeighbor
-    preproc.connect(convertT1, 'out_file', warpT1ToFMRI, 'input_image') # connected to brain.nii NOT brain.mgz
     preproc.connect(tstat, 'out_file', warpT1ToFMRI, 'reference_image')
+
+    if args.pipelineOption == 'iowa':
+        preproc.connect(grabber, 't1_File', bFit, 'movingVolume')
+        preproc.connect(grabber, 't1_File', warpT1ToFMRI, 'input_image')
+
+    elif args.pipelineOption == 'csail':
+        convertT1 = pipe.Node(interface=MRIConvert(), name='freesurferT1convert')
+        convertT1.inputs.out_type = fOutputType
+        convertT1.inputs.in_type = 'mgz'
+        convertT1.inputs.force_ras = True
+        convertT1.inputs.out_datatype = 'short'
+        preproc.connect(grabber, 't1_File', convertT1, 'in_file')
+        preproc.connect(convertT1, 'out_file', bFit, 'movingVolume')
+        preproc.connect(convertT1, 'out_file', warpT1ToFMRI, 'input_image') # connected to brain.nii NOT brain.mgz
+
     preproc.connect([(bFit, warpT1ToFMRI, [(('outputTransform', makeList), 'transforms')])])
 
     # warpT1ToFMRI = warpNN.clone('antsApplyTransformT1')
@@ -282,7 +290,7 @@ def pipeline(args):
     #12
     deconvolve = pipe.Node(interface=Deconvolve(fileCount=3, seriesCount=8), name='afni3Ddeconvolve')
     # deconvolve.inputs.outputtype = outputType # 'AFNI'
-    deconvolve.inputs.ignoreWarnings = 4
+    deconvolve.inputs.ignoreWarnings = 10
     deconvolve.inputs.nullHypothesisPolynomialDegree = 1
     deconvolve.inputs.full_first = True
     deconvolve.inputs.is_float = True
@@ -390,7 +398,7 @@ def pipeline(args):
 
         atlas_DataSink = pipe.Node(interface=DataSink(), name="atlas_DataSink")
         atlas_DataSink.inputs.base_directory = preproc.base_dir # '/paulsen/Experiments/20130417_rsfMRI_Results'
-        atlas_DataSink.inputs.container = 'results'
+        atlas_DataSink.inputs.container = 'Results'
         atlas_DataSink.inputs.parameterization = False
         preproc.connect(renameMasks, 'out_file', atlas_DataSink, 'Atlas')
 
@@ -454,7 +462,7 @@ def pipeline(args):
         preproc.connect(sessions, 'session_id', renameZscore2, 'session')
         preproc.connect(selectLabel, 'out', renameZscore2, 'label')
         preproc.connect(fmriToNAC_label, 'output_image', renameZscore2, 'in_file')
-        preproc.connect(renameZscore2, 'out_file', atlas_DataSink, 'atlas.@zscore')
+        preproc.connect(renameZscore2, 'out_file', atlas_DataSink, 'Atlas.@zscore')
 
 
         ### TEST
@@ -463,7 +471,7 @@ def pipeline(args):
         nacToT1.inputs.interpolation = 'NearestNeighbor'
         nacToT1.inputs.invert_transform_flags = [False]
         preproc.connect(spheres, 'out_file', nacToT1, 'input_image')
-        preproc.connect(convertT1, 'out_file', nacToT1, 'reference_image')
+        ### preproc.connect(convertT1, 'out_file', nacToT1, 'reference_image')
 
         merge1 = pipe.Node(Merger(1), name='mergeNode1')
         preproc.connect(transformGrabber, 'atlasToSessionTransform', merge1, 'in1')
@@ -479,7 +487,7 @@ def pipeline(args):
         t1_DataSink.inputs.parameterization = False
         preproc.connect(sessions, 'session_id', t1_DataSink, 'container')
         preproc.connect(renameMasks3, 'out_file', t1_DataSink, 'T1.@forward')
-        preproc.connect(convertT1, 'out_file', t1_DataSink, 'T1.@T1image')
+        ### preproc.connect(convertT1, 'out_file', t1_DataSink, 'T1.@T1image')
 
         t1ToFMRI = nacToFMRI.clone(name='t1ToFMRI_test')
         t1ToFMRI.inputs.interpolation = 'NearestNeighbor'
@@ -491,7 +499,7 @@ def pipeline(args):
         fmriToT1.inputs.interpolation = 'NearestNeighbor'
         fmriToT1.inputs.invert_transform_flags = [True]
         preproc.connect(t1ToFMRI, 'output_image', fmriToT1, 'input_image')
-        preproc.connect(convertT1, 'out_file', fmriToT1, 'reference_image')
+        ### preproc.connect(convertT1, 'out_file', fmriToT1, 'reference_image')
 
         merge2 = pipe.Node(Merger(1), name='mergeNode2')
         preproc.connect(bFit, 'outputTransform', merge2, 'in1')
