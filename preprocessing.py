@@ -10,7 +10,7 @@ import sys
 
 import SEMTools as sem
 from nipype.interfaces.ants.registration import Registration
-from nipype.interfaces.ants.resampling import ApplyTransforms
+from nipype.interfaces.ants import ApplyTransforms
 from nipype.interfaces.afni.preprocess import *
 from nipype.interfaces.freesurfer.preprocess import *
 from nipype.interfaces.io import DataSink, DataGrabber
@@ -173,13 +173,13 @@ def pipeline(args):
     #5
     merge = pipe.Node(interface=Merge(), name='afni3Dmerge')
     merge.inputs.outputtype = outputType
-    merge.inputs.blurfwhm = 10
+    merge.inputs.blurfwhm = 6
     merge.inputs.doall = True
     merge.inputs.args = '-1noneg -1clip 100' # TODO
     # TODO: implement
     # merge.inputs.onenoneg = True
     # merge.inputs.oneclip = 100
-    preproc.connect(zpad, 'out_file', merge, 'in_files')                  #5 ### NOTE: ONLY ONE FILE TO in_files. JV changed blurr to 10 temporarily on april 19, 2013.
+    preproc.connect(zpad, 'out_file', merge, 'in_files')                  #5 ### NOTE: ONLY ONE FILE TO in_files. JV changed blurr back to 6 on 5/14/2013.
 
     #6
     automask = pipe.Node(interface=Automask(), name='afni3Dautomask')
@@ -328,8 +328,12 @@ def pipeline(args):
     preproc.connect(deconvolve, 'out_errts', detrend, 'in_file')          #13
 
     if args.pipelineOption == 'iowa':
+        # CONSTANTS
         nacAtlasFile = "/IPLlinux/ipldev/scratch/welchdm/bld/rs-fMRI/BSA/ReferenceAtlas-build/Atlas/Atlas_20130106/template_t1.nii.gz"
 
+        nacResampleResolution = (2.0, 2.0, 2.0)
+        downsampledNACfilename = 'downsampledNACatlas.nii.gz'
+        # WORKFLOW
         transformGrabber = pipe.Node(interface=DataGrabber(infields=['session_id'],
                                                            outfields=['atlasToSessionTransform',
                                                                       'sessionToAtlasTransform']),
@@ -354,11 +358,19 @@ def pipeline(args):
         preproc.connect(bFit, 'outputTransform', reverseTransform, 'in2')
         preproc.connect(transformGrabber, 'sessionToAtlasTransform', reverseTransform, 'in1')
 
+        downsampleAtlas = pipe.Node(interface=Function(function=resampleImage,
+                                                       input_names=['infile', 'outfile', 'resolution'],
+                                                       output_names=['outfile']),
+                                                       name='downsampleAtlas')
+        downsampleAtlas.inputs.infile = nacAtlasFile
+        downsampleAtlas.inputs.resolution = nacResampleResolution
+        downsampleAtlas.inputs.outfile = downsampledNACfilename
+
         fmriToNAC_epi = pipe.Node(interface=ApplyTransforms(), name='fmriToNac_epi')
         fmriToNAC_epi.inputs.interpolation = 'Linear'
         fmriToNAC_epi.inputs.invert_transform_flags = [False, True]
-        fmriToNAC_epi.inputs.reference_image = nacAtlasFile
         preproc.connect(detrend, 'out_file', fmriToNAC_epi, 'input_image') # Detrend is the last NIFTI file format in the AFNI pipeline
+        preproc.connect(downsampleAtlas, 'outfile', fmriToNAC_epi, 'reference_image')
         preproc.connect(reverseTransform, 'out', fmriToNAC_epi, 'transforms')
 
         ### Create seed points
@@ -385,7 +397,7 @@ def pipeline(args):
         spheres = pipe.Node(interface=Calc(letters=['a']),
                             name='afni3Dcalc_seeds')
         spheres.inputs.outputtype = outputType
-        spheres.inputs.in_file_a = nacAtlasFile
+        preproc.connect(downsampleAtlas, 'outfile', spheres, 'in_file_a')
         spheres.inputs.args = '-nscale'
 
         preproc.connect(points, 'expression', spheres, 'expr')
@@ -400,6 +412,7 @@ def pipeline(args):
         atlas_DataSink.inputs.container = 'Results'
         atlas_DataSink.inputs.parameterization = False
         preproc.connect(renameMasks, 'out_file', atlas_DataSink, 'Atlas')
+        preproc.connect(downsampleAtlas, 'outfile', atlas_DataSink, 'Atlas.@resampled')
 
         # Warp seed output to FMRI
         nacToFMRI = pipe.Node(interface=ApplyTransforms(), name="nacToFMRI")
@@ -452,7 +465,7 @@ def pipeline(args):
         fmriToNAC_label = fmriToNAC_epi.clone(name='fmriToNac_label')
         fmriToNAC_label.inputs.interpolation = 'Linear'
         fmriToNAC_label.inputs.invert_transform_flags = [False, True]
-        fmriToNAC_label.inputs.reference_image = nacAtlasFile
+        preproc.connect(downsampleAtlas, 'outfile', fmriToNAC_label, 'reference_image')
         preproc.connect(regionLogCalc, 'out_file', fmriToNAC_label, 'input_image')
         preproc.connect(reverseTransform, 'out', fmriToNAC_label, 'transforms')
 
@@ -466,73 +479,74 @@ def pipeline(args):
 
         ### TEST
 
-        nacToT1 = nacToFMRI.clone(name='nacToT1_test')
-        nacToT1.inputs.interpolation = 'NearestNeighbor'
-        nacToT1.inputs.invert_transform_flags = [False]
-        preproc.connect(spheres, 'out_file', nacToT1, 'input_image')
-        preproc.connect(grabber, 't1_File', nacToT1, 'reference_image')
+        # nacToT1 = nacToFMRI.clone(name='nacToT1_test')
+        # nacToT1.inputs.interpolation = 'NearestNeighbor'
+        # nacToT1.inputs.invert_transform_flags = [False]
+        # preproc.connect(spheres, 'out_file', nacToT1, 'input_image')
+        # preproc.connect(grabber, 't1_File', nacToT1, 'reference_image')
 
-        merge1 = pipe.Node(Merger(1), name='mergeNode1')
-        preproc.connect(transformGrabber, 'atlasToSessionTransform', merge1, 'in1')
-        preproc.connect(merge1, 'out', nacToT1, 'transforms')
+        # merge1 = pipe.Node(Merger(1), name='mergeNode1')
+        # preproc.connect(transformGrabber, 'atlasToSessionTransform', merge1, 'in1')
+        # preproc.connect(merge1, 'out', nacToT1, 'transforms')
 
-        renameMasks3 = pipe.Node(interface=Rename(format_string='%(label)s_forward'), name='renameMasksT1')
-        renameMasks3.inputs.keep_ext = True
-        preproc.connect(nacToT1, 'output_image', renameMasks3, 'in_file')
-        preproc.connect(selectLabel, 'out', renameMasks3, 'label')
+        # renameMasks3 = pipe.Node(interface=Rename(format_string='%(label)s_forward'), name='renameMasksT1')
+        # renameMasks3.inputs.keep_ext = True
+        # preproc.connect(nacToT1, 'output_image', renameMasks3, 'in_file')
+        # preproc.connect(selectLabel, 'out', renameMasks3, 'label')
 
-        t1_DataSink = fmri_DataSink.clone('t1_DataSink')
-        t1_DataSink.inputs.base_directory = os.path.join(preproc.base_dir, 'Results') # '/paulsen/Experiments/20130417_rsfMRI_Results'
-        t1_DataSink.inputs.parameterization = False
-        preproc.connect(sessions, 'session_id', t1_DataSink, 'container')
-        preproc.connect(renameMasks3, 'out_file', t1_DataSink, 'T1.@forward')
-        preproc.connect(grabber, 't1_File', t1_DataSink, 'T1.@T1image')
+        # t1_DataSink = fmri_DataSink.clone('t1_DataSink')
+        # t1_DataSink.inputs.base_directory = os.path.join(preproc.base_dir, 'Results') # '/paulsen/Experiments/20130417_rsfMRI_Results'
+        # t1_DataSink.inputs.parameterization = False
+        # preproc.connect(sessions, 'session_id', t1_DataSink, 'container')
+        # preproc.connect(renameMasks3, 'out_file', t1_DataSink, 'T1.@forward')
+        # preproc.connect(grabber, 't1_File', t1_DataSink, 'T1.@T1image')
 
-        t1ToFMRI = nacToFMRI.clone(name='t1ToFMRI_test')
-        t1ToFMRI.inputs.interpolation = 'NearestNeighbor'
-        t1ToFMRI.inputs.invert_transform_flags = [False]
-        preproc.connect(nacToT1, 'output_image', t1ToFMRI, 'input_image')
-        preproc.connect(warpT1ToFMRI, 'output_image', t1ToFMRI, 'reference_image')
+        # t1ToFMRI = nacToFMRI.clone(name='t1ToFMRI_test')
+        # t1ToFMRI.inputs.interpolation = 'NearestNeighbor'
+        # t1ToFMRI.inputs.invert_transform_flags = [False]
+        # preproc.connect(nacToT1, 'output_image', t1ToFMRI, 'input_image')
+        # preproc.connect(warpT1ToFMRI, 'output_image', t1ToFMRI, 'reference_image')
 
-        fmriToT1 = nacToFMRI.clone(name='fmriToT1_test')
-        fmriToT1.inputs.interpolation = 'NearestNeighbor'
-        fmriToT1.inputs.invert_transform_flags = [True]
-        preproc.connect(t1ToFMRI, 'output_image', fmriToT1, 'input_image')
-        preproc.connect(grabber, 't1_File', fmriToT1, 'reference_image')
+        # fmriToT1 = nacToFMRI.clone(name='fmriToT1_test')
+        # fmriToT1.inputs.interpolation = 'NearestNeighbor'
+        # fmriToT1.inputs.invert_transform_flags = [True]
+        # preproc.connect(t1ToFMRI, 'output_image', fmriToT1, 'input_image')
+        # preproc.connect(grabber, 't1_File', fmriToT1, 'reference_image')
 
-        merge2 = pipe.Node(Merger(1), name='mergeNode2')
-        preproc.connect(bFit, 'outputTransform', merge2, 'in1')
-        preproc.connect(merge2, 'out', fmriToT1, 'transforms')
-        preproc.connect(merge2, 'out', t1ToFMRI, 'transforms')
+        # merge2 = pipe.Node(Merger(1), name='mergeNode2')
+        # preproc.connect(bFit, 'outputTransform', merge2, 'in1')
+        # preproc.connect(merge2, 'out', fmriToT1, 'transforms')
+        # preproc.connect(merge2, 'out', t1ToFMRI, 'transforms')
 
-        renameMasks4 = pipe.Node(interface=Rename(format_string='%(label)s_reverse'), name='renameMasksT1_2')
-        renameMasks4.inputs.keep_ext = True
-        preproc.connect(fmriToT1, 'output_image', renameMasks4, 'in_file')
-        preproc.connect(selectLabel, 'out', renameMasks4, 'label')
+        # renameMasks4 = pipe.Node(interface=Rename(format_string='%(label)s_reverse'), name='renameMasksT1_2')
+        # renameMasks4.inputs.keep_ext = True
+        # preproc.connect(fmriToT1, 'output_image', renameMasks4, 'in_file')
+        # preproc.connect(selectLabel, 'out', renameMasks4, 'label')
 
-        preproc.connect(renameMasks4, 'out_file', t1_DataSink, 'T1.@reverse')
+        # preproc.connect(renameMasks4, 'out_file', t1_DataSink, 'T1.@reverse')
 
-        t1ToNAC_test = fmriToNAC_epi.clone('t1ToNAC_test')
-        t1ToNAC_test.inputs.interpolation = 'NearestNeighbor'
-        t1ToNAC_test.inputs.invert_transform_flags = [False]
-        preproc.connect(fmriToT1, 'output_image', t1ToNAC_test, 'input_image')
+        # t1ToNAC_test = fmriToNAC_epi.clone('t1ToNAC_test')
+        # t1ToNAC_test.inputs.interpolation = 'NearestNeighbor'
+        # t1ToNAC_test.inputs.invert_transform_flags = [False]
+        # preproc.connect(fmriToT1, 'output_image', t1ToNAC_test, 'input_image')
+        # preproc.connect(downsampleAtlas, 'outfile', t1ToNAC_test, 'reference_image')
 
-        merge3 = pipe.Node(Merger(1), name='mergeNode3')
-        preproc.connect(transformGrabber, 'sessionToAtlasTransform', merge3, 'in1')
-        preproc.connect(merge3, 'out', t1ToNAC_test, 'transforms')
+        # merge3 = pipe.Node(Merger(1), name='mergeNode3')
+        # preproc.connect(transformGrabber, 'sessionToAtlasTransform', merge3, 'in1')
+        # preproc.connect(merge3, 'out', t1ToNAC_test, 'transforms')
 
-        renameMasks30 = pipe.Node(interface=Rename(format_string='%(label)s_reverse_mask'), name='renameMasksT1ToNACmask')
-        renameMasks30.inputs.keep_ext = True
-        preproc.connect(t1ToNAC_test, 'output_image', renameMasks30, 'in_file')
-        preproc.connect(selectLabel, 'out', renameMasks30, 'label')
-        preproc.connect(renameMasks30, 'out_file', atlas_DataSink, 'Atlas.@reverse')
+        # renameMasks30 = pipe.Node(interface=Rename(format_string='%(label)s_reverse_mask'), name='renameMasksT1ToNACmask')
+        # renameMasks30.inputs.keep_ext = True
+        # preproc.connect(t1ToNAC_test, 'output_image', renameMasks30, 'in_file')
+        # preproc.connect(selectLabel, 'out', renameMasks30, 'label')
+        # preproc.connect(renameMasks30, 'out_file', atlas_DataSink, 'Atlas.@reverse')
 
-        fmriToNAC_test = fmriToNAC_epi.clone(name='fmriToNac_test')
-        fmriToNAC_test.inputs.interpolation = 'NearestNeighbor'
-        fmriToNAC_test.inputs.invert_transform_flags = [False, True]
-        fmriToNAC_test.inputs.reference_image = nacAtlasFile
-        preproc.connect(nacToFMRI, 'output_image', fmriToNAC_test, 'input_image')
-        preproc.connect(reverseTransform, 'out', fmriToNAC_test, 'transforms')
+        # fmriToNAC_test = fmriToNAC_epi.clone(name='fmriToNac_test')
+        # fmriToNAC_test.inputs.interpolation = 'NearestNeighbor'
+        # fmriToNAC_test.inputs.invert_transform_flags = [False, True]
+        # preproc.connect(downsampleAtlas, 'outfile', fmriToNAC_test, 'reference_image')
+        # preproc.connect(nacToFMRI, 'output_image', fmriToNAC_test, 'input_image')
+        # preproc.connect(reverseTransform, 'out', fmriToNAC_test, 'transforms')
         ### END TEST
 
     elif args.pipelineOption == 'csail':

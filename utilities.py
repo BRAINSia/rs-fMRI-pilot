@@ -282,3 +282,31 @@ def formatFMRI(dicomDirectory):
 
     return modality, numberOfSlices, numberOfFiles, repetitionTime, sliceOrder
 
+def resampleImage(infile, outfile, resolution=(1.0, 1.0, 1.0)):
+    """
+    Resample the image using Linear interpolation (and identity transform) to the given resolution and write out the file
+
+    """
+    import os
+
+    import SimpleITK as sitk
+
+    image = sitk.ReadImage(infile)
+    outImage = image
+    old_size = list(image.GetSize())
+    old_res = list(image.GetSpacing())
+    new_res = list(resolution)
+    new_size = [ int((old_size[i] * old_res[i]) / new_res[i]) for i in range(len(new_res))]
+    outImage = sitk.Resample(outImage,
+                         transform=sitk.Transform(),
+                         outputSpacing=resolution,
+                         interpolator=sitk.sitkLinear,
+                         size=tuple(new_size),
+                         outputOrigin=image.GetOrigin(),
+                         outputDirection=image.GetDirection())
+    felements = outfile.split('.')
+    if len(felements) == 1:
+        outfile += '.nii.gz'
+    outfile = os.path.join(os.getcwd(), outfile)
+    sitk.WriteImage(outImage, outfile)
+    return outfile
