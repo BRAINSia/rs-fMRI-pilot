@@ -218,16 +218,23 @@ def pipeline(args):
     bFit.inputs.costMetric = 'MMI' # (default)
     bFit.inputs.numberOfSamples = 100000 # (default)
     bFit.inputs.outputTransform = True
-    preproc.connect(tstat, 'out_file', bFit, 'fixedVolume')
+    #############################################################################################################################
+    # The registration of the T1 -> fMRI is good _most_ of the time, but sometimes it hits a local minimum during optimization. #
+    # To prevent this, we set the fMRI image as the moving image and the T1 as the fixed.  When we run ApplyTransforms, we pass #
+    # it the inverse rigid transform file (or give it the 'inverse' flag)                                                       #
+    #############################################################################################################################
+
+    preproc.connect(tstat, 'out_file', bFit, 'movingVolume')
 
     ### preprocessing_part2.sh
     warpT1ToFMRI = pipe.Node(interface=ApplyTransforms(), iterfield=['input_image'],
                              name='antsApplyTransformsT1')
     warpT1ToFMRI.inputs.interpolation='Linear' # Validation test value: NearestNeighbor
+    warpT1ToFMRI.inputs.invert_transform_flags = [True]
     preproc.connect(tstat, 'out_file', warpT1ToFMRI, 'reference_image')
 
     if args.pipelineOption == 'iowa':
-        preproc.connect(grabber, 't1_File', bFit, 'movingVolume')
+        preproc.connect(grabber, 't1_File', bFit, 'fixedVolume')
         preproc.connect(grabber, 't1_File', warpT1ToFMRI, 'input_image')
 
     elif args.pipelineOption == 'csail':
@@ -237,7 +244,7 @@ def pipeline(args):
         convertT1.inputs.force_ras = True
         convertT1.inputs.out_datatype = 'short'
         preproc.connect(grabber, 't1_File', convertT1, 'in_file')
-        preproc.connect(convertT1, 'out_file', bFit, 'movingVolume')
+        preproc.connect(convertT1, 'out_file', bFit, 'fixedVolume')
         preproc.connect(convertT1, 'out_file', warpT1ToFMRI, 'input_image') # connected to brain.nii NOT brain.mgz
 
     preproc.connect([(bFit, warpT1ToFMRI, [(('outputTransform', makeList), 'transforms')])])
@@ -368,7 +375,7 @@ def pipeline(args):
 
         fmriToNAC_epi = pipe.Node(interface=ApplyTransforms(), name='fmriToNac_epi')
         fmriToNAC_epi.inputs.interpolation = 'Linear'
-        fmriToNAC_epi.inputs.invert_transform_flags = [False, True]
+        fmriToNAC_epi.inputs.invert_transform_flags = [False, False]
         preproc.connect(detrend, 'out_file', fmriToNAC_epi, 'input_image') # Detrend is the last NIFTI file format in the AFNI pipeline
         preproc.connect(downsampleAtlas, 'outfile', fmriToNAC_epi, 'reference_image')
         preproc.connect(reverseTransform, 'out', fmriToNAC_epi, 'transforms')
@@ -417,7 +424,7 @@ def pipeline(args):
         # Warp seed output to FMRI
         nacToFMRI = pipe.Node(interface=ApplyTransforms(), name="nacToFMRI")
         nacToFMRI.inputs.interpolation = 'NearestNeighbor'
-        nacToFMRI.inputs.invert_transform_flags = [False, False]
+        nacToFMRI.inputs.invert_transform_flags = [True, False]
         preproc.connect(spheres, 'out_file', nacToFMRI, 'input_image')
         preproc.connect(warpT1ToFMRI, 'output_image', nacToFMRI, 'reference_image')
         preproc.connect(forwardTransform, 'out', nacToFMRI, 'transforms')
@@ -464,7 +471,7 @@ def pipeline(args):
         ### Move z values back into NAC atlas space
         fmriToNAC_label = fmriToNAC_epi.clone(name='fmriToNac_label')
         fmriToNAC_label.inputs.interpolation = 'Linear'
-        fmriToNAC_label.inputs.invert_transform_flags = [False, True]
+        fmriToNAC_label.inputs.invert_transform_flags = [False, False]
         preproc.connect(downsampleAtlas, 'outfile', fmriToNAC_label, 'reference_image')
         preproc.connect(regionLogCalc, 'out_file', fmriToNAC_label, 'input_image')
         preproc.connect(reverseTransform, 'out', fmriToNAC_label, 'transforms')
@@ -478,7 +485,8 @@ def pipeline(args):
 
 
         ### TEST
-
+        # ************ WARNING! The BRAINSFit transform has been reversed, but this code ******************
+        # ************ has NOT been updated!  Use with caution!                          ******************
         # nacToT1 = nacToFMRI.clone(name='nacToT1_test')
         # nacToT1.inputs.interpolation = 'NearestNeighbor'
         # nacToT1.inputs.invert_transform_flags = [False]
