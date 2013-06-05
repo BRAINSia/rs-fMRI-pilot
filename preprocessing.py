@@ -70,8 +70,8 @@ def pipeline(args):
                                         faparc2009_File=[['session_id', '10_AUTO.NN3Tv20110419',
                                                   'JOY_v51_2011', 'session_id', 'mri_nifti',
                                                   'aparc.a2009s+aseg.nii.gz']],
-                                        csfFile=[['session_id', 'ACCUMULATED_POSTERIORS',
-                                                   'POSTERIOR_CSF_TOTAL.nii.gz']],
+                                        csfFile=[['session_id', 'CleanedDenoisedRFSegmentations',
+                                                   'allLabels_seg.nii.gz']],
                                         whmFile=[['session_id', 'ACCUMULATED_POSTERIORS',
                                                   'POSTERIOR_WM_TOTAL.nii.gz']])
     if args.pipelineOption == 'iowa':

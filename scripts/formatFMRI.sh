@@ -107,12 +107,13 @@ if [ "$modality" == "fmri" ]; then
     else
         # HACK/GUESS
         # Don't know what the code would be, so using this as a catch-all
-        if [ "$isOdd" == "1" ]; then
-            sliceOrder="alt-z"
-        else
-            sliceOrder="alt-z2"
-        fi
+        # if [ "$isOdd" == "1" ]; then
+        #     sliceOrder="alt-z"
+        # else
+        #     sliceOrder="alt-z2"
+        # fi
         # END HACK
+        exit 2
     fi
     echo "$modality $nSlices $nimages $tr $sliceOrder"
 elif  [ "$modality" == "mri" ]; then

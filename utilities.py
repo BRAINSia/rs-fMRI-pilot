@@ -79,16 +79,18 @@ def generateTissueMask(input_file, low=0.0, high=1.0, erodeFlag=True):
         connected = sitk.ConnectedComponent(erodedMask)
         sortedComp = sitk.RelabelComponent(connected, 10) # HACK
         maskOnly = sitk.BinaryThreshold(sortedComp, 1, 1)
+        sitk.WriteImage(binaryMask, os.path.abspath('binary_' + fileName))
+        sitk.WriteImage(connected, os.path.abspath('connected_' + fileName))
+        sitk.WriteImage(sortedComp, os.path.abspath('sorted_' + fileName))
+        sitk.WriteImage(maskOnly, os.path.abspath('final_' + fileName))
     else:
         fileName = 'csfMask.nii'
-        connected = sitk.ConnectedComponent(binaryMask)
-        sortedComp = sitk.RelabelComponent(connected)
-        #        maskOnly = sitk.BinaryThreshold(sortedComp, 0.0, 1.0, inValue, outValue)
-        maskOnly = sitk.BinaryThreshold(sortedComp, 2.0, 2.0)
-    sitk.WriteImage(binaryMask, os.path.abspath('binary_' + fileName))
-    sitk.WriteImage(connected, os.path.abspath('connected_' + fileName))
-    sitk.WriteImage(sortedComp, os.path.abspath('sorted_' + fileName))
-    sitk.WriteImage(maskOnly, os.path.abspath('final_' + fileName))
+        eroded_whole_brain = sitk.BinaryErode(image > 0, 10)
+        guess = eroded_whole_brain * (image == 4)
+        safe_guess = sitk.BinaryErode(guess, 1)
+        sitk.WriteImage(eroded_whole_brain, os.path.abspath('binary_whole_brain_' + fileName))
+        sitk.WriteImageguess, os.path.abspath('guess_' + fileName))
+        sitk.WriteImage(safe_guess, os.path.abspath('safe_guess_' + fileName))
     return os.path.abspath('final_' + fileName)
 
 def getLabelList(label_file, arg_template):
