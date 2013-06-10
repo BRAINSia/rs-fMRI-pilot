@@ -70,7 +70,7 @@ def pipeline(args):
                                         faparc2009_File=[['session_id', '10_AUTO.NN3Tv20110419',
                                                   'JOY_v51_2011', 'session_id', 'mri_nifti',
                                                   'aparc.a2009s+aseg.nii.gz']],
-                                        csfFile=[['session_id', 'TissueClassify', 
+                                        csfFile=[['session_id', 'TissueClassify',
                                                   'masked_fixed_brainlabels_seg.nii.gz']],
                                         whmFile=[['session_id', 'ACCUMULATED_POSTERIORS',
                                                   'POSTERIOR_WM_TOTAL.nii.gz']])
@@ -85,6 +85,34 @@ def pipeline(args):
         grabber.inputs.template_args['t1_File'] = [['session_id', '10_AUTO.NN3Tv20110419',
                                                     'JOY_v51_2011', 'session_id', 'mri', 'brain.mgz']]
     preproc.connect(sessions, 'session_id', grabber, 'session_id')
+    # CONSTANTS
+    nacAtlasFile = "/paulsen/Experiments/rsFMRI/rs-fMRI-pilot/ReferenceAtlas/template_t1.nii.gz"
+    nacAtlasLabel = "/paulsen/Experiments/rsFMRI/rs-fMRI-pilot/ReferenceAtlas/template_nac_labels.nii.gz"
+    nacResampleResolution = (2.0, 2.0, 2.0)
+    downsampledNACfilename = 'downsampledNACatlas.nii.gz'
+    # WORKFLOW
+    transformGrabber = pipe.Node(interface=DataGrabber(infields=['session_id'],
+                                                       outfields=['atlasToSessionTransform',
+                                                                  'sessionToAtlasTransform']),
+                                 name='transformGrabber')
+    transformGrabber.inputs.base_directory = '/paulsen/Experiments/20130202_PREDICTHD_Results/SubjectToAtlasWarped'
+    transformGrabber.inputs.template = '*'
+    transformRegex = '%s/AtlasToSubject_%sComposite.h5'
+    transformGrabber.inputs.field_template = dict(atlasToSessionTransform=transformRegex,
+                                                  sessionToAtlasTransform=transformRegex)
+    transformGrabber.inputs.template_args = dict(atlasToSessionTransform=[['session_id', '']],
+                                                 sessionToAtlasTransform=[['session_id', 'Inverse']])
+    preproc.connect(sessions, 'session_id', transformGrabber, 'session_id')
+
+    ### NOTE: antsApplyTransforms takes transforms in REVERSE order!!!
+    # Concatenate transforms: NAC -> T1 -> fMRI
+    forwardTransform = pipe.Node(Merger(2), name='0_List_forwardTransformNACToFMRI')
+    preproc.connect(transformGrabber, 'atlasToSessionTransform', forwardTransform, 'in2')
+
+
+    # Concatenate transforms: NAC <- T1 <- fMRI
+    reverseTransform = pipe.Node(Merger(2), name='0_List_reverseTransformFMRIToNAC')
+    preproc.connect(transformGrabber, 'sessionToAtlasTransform', reverseTransform, 'in1')
 
     formatFMRINode = pipe.Node(interface=Function(function=formatFMRI,
                                                   input_names=['dicomDirectory'],
@@ -236,6 +264,8 @@ def pipeline(args):
     if args.pipelineOption == 'iowa':
         preproc.connect(grabber, 't1_File', bFit, 'fixedVolume')
         preproc.connect(grabber, 't1_File', warpT1ToFMRI, 'input_image')
+        preproc.connect(bFit, 'outputTransform', forwardTransform, 'in1')
+        preproc.connect(bFit, 'outputTransform', reverseTransform, 'in2')
 
     elif args.pipelineOption == 'csail':
         convertT1 = pipe.Node(interface=MRIConvert(), name='freesurferT1convert')
@@ -247,17 +277,10 @@ def pipeline(args):
         preproc.connect(convertT1, 'out_file', bFit, 'fixedVolume')
         preproc.connect(convertT1, 'out_file', warpT1ToFMRI, 'input_image') # connected to brain.nii NOT brain.mgz
 
-    preproc.connect([(bFit, warpT1ToFMRI, [(('outputTransform', makeList), 'transforms')])])
-
-    warpCSF = warpT1ToFMRI.clone('antsApplyTransformCSF')
-    preproc.connect(grabber, 'csfFile', warpCSF, 'input_image')
-    preproc.connect(tstat, 'out_file', warpCSF, 'reference_image')
-    preproc.connect([(bFit, warpCSF, [(('outputTransform', makeList), 'transforms')])])
-
-    warpWHM = warpT1ToFMRI.clone('antsApplyTransformWHM')
-    preproc.connect(grabber, 'whmFile', warpWHM, 'input_image')
-    preproc.connect(tstat, 'out_file', warpWHM, 'reference_image')
-    preproc.connect([(bFit, warpWHM, [(('outputTransform', makeList), 'transforms')])])
+    forwardTransformT1ToFMRI = pipe.Node(Merger(1), name='0_List_forwardTransformT1ToFMRI')
+    preproc.connect(bFit, 'outputTransform', forwardTransformT1ToFMRI, 'in1')
+    preproc.connect(forwardTransformT1ToFMRI, 'out', warpT1ToFMRI, 'transforms')
+    # preproc.connect([(bFit, warpT1ToFMRI, [(('outputTransform', makeList), 'transforms')])])
 
     #10
     csfmask = pipe.Node(interface=Function(function=generateTissueMask,
@@ -267,7 +290,19 @@ def pipeline(args):
     csfmask.inputs.low = 0.99
     csfmask.inputs.high = 1.0
     csfmask.inputs.erodeFlag = False
-    preproc.connect(warpCSF, 'output_image', csfmask, 'input_file')       #10
+    csfmask.inputs.input_file = nacAtlasLabel
+
+    warpCSF = warpT1ToFMRI.clone('antsApplyTransformCSF')
+    warpCSF.inputs.invert_transform_flags = [True, False]
+    preproc.connect(csfFile, 'output_file', warpCSF, 'input_image')       #10
+    preproc.connect(forwardTransform, 'out', warpCSF, 'transforms')
+    preproc.connect(tstat, 'out_file', warpCSF, 'reference_image')
+
+    warpWHM = warpT1ToFMRI.clone('antsApplyTransformWHM')
+    preproc.connect(grabber, 'whmFile', warpWHM, 'input_image')
+    preproc.connect(tstat, 'out_file', warpWHM, 'reference_image')
+    preproc.connect(forwardTransformT1ToFMRI, 'out', warpWHM, 'transforms')
+    # preproc.connect([(bFit, warpWHM, [(('outputTransform', makeList), 'transforms')])])
 
     #11
     wmmask = pipe.Node(interface=Function(function=generateTissueMask,
@@ -335,36 +370,6 @@ def pipeline(args):
     preproc.connect(deconvolve, 'out_errts', detrend, 'in_file')          #13
 
     if args.pipelineOption == 'iowa':
-        # CONSTANTS
-        nacAtlasFile = "/Shared/sinapse/scratch/welchdm/bld/rs-fMRI/BSA/ReferenceAtlas-build/Atlas/Atlas_20130106/template_t1.nii.gz"
-
-        nacResampleResolution = (2.0, 2.0, 2.0)
-        downsampledNACfilename = 'downsampledNACatlas.nii.gz'
-        # WORKFLOW
-        transformGrabber = pipe.Node(interface=DataGrabber(infields=['session_id'],
-                                                           outfields=['atlasToSessionTransform',
-                                                                      'sessionToAtlasTransform']),
-                                     name='transformGrabber')
-        transformGrabber.inputs.base_directory = '/paulsen/Experiments/20130202_PREDICTHD_Results/SubjectToAtlasWarped'
-        transformGrabber.inputs.template = '*'
-        transformRegex = '%s/AtlasToSubject_%sComposite.h5'
-        transformGrabber.inputs.field_template = dict(atlasToSessionTransform=transformRegex,
-                                                      sessionToAtlasTransform=transformRegex)
-        transformGrabber.inputs.template_args = dict(atlasToSessionTransform=[['session_id', '']],
-                                                     sessionToAtlasTransform=[['session_id', 'Inverse']])
-        preproc.connect(sessions, 'session_id', transformGrabber, 'session_id')
-
-        ### NOTE: antsApplyTransforms takes transforms in REVERSE order!!!
-        # Concatenate transforms: NAC -> T1 -> fMRI
-        forwardTransform = pipe.Node(Merger(2), name='forwardTransformList')
-        preproc.connect(transformGrabber, 'atlasToSessionTransform', forwardTransform, 'in2')
-        preproc.connect(bFit, 'outputTransform', forwardTransform, 'in1')
-
-        # Concatenate transforms: NAC <- T1 <- fMRI
-        reverseTransform = pipe.Node(Merger(2), name='reverseTransformList')
-        preproc.connect(bFit, 'outputTransform', reverseTransform, 'in2')
-        preproc.connect(transformGrabber, 'sessionToAtlasTransform', reverseTransform, 'in1')
-
         downsampleAtlas = pipe.Node(interface=Function(function=resampleImage,
                                                        input_names=['infile', 'outfile', 'resolution'],
                                                        output_names=['outfile']),
@@ -561,13 +566,15 @@ def pipeline(args):
 
         warpFS1 = pipe.Node(interface=ApplyTransforms(), name='antsApplyTransformsFS1')
         warpFS1.inputs.interpolation='MultiLabel'
-        preproc.connect([(bFit, warpFS1, [(('outputTransform', makeList), 'transforms')])])
+        preproc.connect(forwardTransformT1ToFMRI, 'out', warpFS1, 'transforms')
+        # preproc.connect([(bFit, warpFS1, [(('outputTransform', makeList), 'transforms')])])
         preproc.connect(grabber, 'faparc_File', warpFS1, 'input_image')
         preproc.connect(tstat, 'out_file', warpFS1, 'reference_image')
 
         warpFS2 = pipe.Node(interface=ApplyTransforms(), name='antsApplyTransformsFS2')
         warpFS2.inputs.interpolation='MultiLabel'
-        preproc.connect([(bFit, warpFS2, [(('outputTransform', makeList), 'transforms')])])
+        preproc.connect(forwardTransformT1ToFMRI, 'out', warpFS2, 'transforms')
+        # preproc.connect([(bFit, warpFS2, [(('outputTransform', makeList), 'transforms')])])
         preproc.connect(grabber, 'faparc2009_File', warpFS2, 'input_image')
         preproc.connect(tstat, 'out_file', warpFS2, 'reference_image')
 

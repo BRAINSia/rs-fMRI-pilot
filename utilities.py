@@ -85,16 +85,11 @@ def generateTissueMask(input_file, low=0.0, high=1.0, erodeFlag=True):
         sitk.WriteImage(maskOnly, os.path.abspath('final_' + fileName))
     else:
         fileName = 'csfMask.nii'
-         # Binary operations are done in voxel space, NOT physical, so we need to convert the kernel size of the ball accordingly
-        kernel_dimensions = lambda x: tuple([int(x/i) for i in image.GetSpacing()])
-	whole_brain = (image > 0) # * sitk.BinaryMorphologicalClosing(image > 0, 2)
-        eroded_whole_brain = sitk.BinaryErode(whole_brain, kernel_dimensions(20))
-        safe_guess = eroded_whole_brain * (image == 4)
-        # safe_guess = sitk.BinaryErode(guess, kernel_dimensions(1))
-	sitk.WriteImage(whole_brain, os.path.abspath('binary_whole_brain_' + fileName))
-        sitk.WriteImage(eroded_whole_brain, os.path.abspath('eroded_whole_brain_' + fileName))
-        # sitk.WriteImage(guess, os.path.abspath('guess_' + fileName))
-        sitk.WriteImage(safe_guess, os.path.abspath('final_' + fileName))
+        csfLabels = [4,23]
+        final_image = image * 0
+        for label in csfLabels:
+            final_image += sitk.BinaryThreshold(image, label - 1, label)
+        sitk.WriteImage(final_image, os.path.abspath('final_' + fileName))
     return os.path.abspath('final_' + fileName)
 
 def getLabelList(label_file, arg_template):
