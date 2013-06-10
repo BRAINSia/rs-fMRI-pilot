@@ -91,27 +91,30 @@ if [ "$modality" == "fmri" ]; then
     # grep the value of sSliceArray.ucMode
     order=`strings $eximage | grep sSliceArray.ucMode | awk '{print $3}'`
     isOdd=`expr $nSlices % 2`
-    if [ "order" == "0x4" ]; then
+    if [ "$order" == "0x4" ]; then
         # interleaved
         if [ "$isOdd" == "1" ]; then
             sliceOrder="alt+z"
         else
             sliceOrder="alt+z2"
         fi
-    elif [ "order" == "0x2" ]; then
+    elif [ "$order" == "0x2" ]; then
         # descending
         sliceOrder="seq-z"
-    elif [ "order" == "0x1" ]; then
+    elif [ "$order" == "0x1" ]; then
         # ascending
         sliceOrder="seq+z"
     else
         # HACK/GUESS
         # Don't know what the code would be, so using this as a catch-all
-        # if [ "$isOdd" == "1" ]; then
+        echo "Order: "$order
+        if [ "$isOdd" == "1" ]; then
         #     sliceOrder="alt-z"
-        # else
+            echo "Dicom is interleaved"
+        else
         #     sliceOrder="alt-z2"
-        # fi
+            echo "Dicom is not interleaved"
+        fi
         # END HACK
         exit 2
     fi

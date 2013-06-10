@@ -85,12 +85,16 @@ def generateTissueMask(input_file, low=0.0, high=1.0, erodeFlag=True):
         sitk.WriteImage(maskOnly, os.path.abspath('final_' + fileName))
     else:
         fileName = 'csfMask.nii'
-        eroded_whole_brain = sitk.BinaryErode(image > 0, 10)
-        guess = eroded_whole_brain * (image == 4)
-        safe_guess = sitk.BinaryErode(guess, 1)
-        sitk.WriteImage(eroded_whole_brain, os.path.abspath('binary_whole_brain_' + fileName))
-        sitk.WriteImageguess, os.path.abspath('guess_' + fileName))
-        sitk.WriteImage(safe_guess, os.path.abspath('safe_guess_' + fileName))
+         # Binary operations are done in voxel space, NOT physical, so we need to convert the kernel size of the ball accordingly
+        kernel_dimensions = lambda x: tuple([int(x/i) for i in image.GetSpacing()])
+	whole_brain = (image > 0) # * sitk.BinaryMorphologicalClosing(image > 0, 2)
+        eroded_whole_brain = sitk.BinaryErode(whole_brain, kernel_dimensions(20))
+        safe_guess = eroded_whole_brain * (image == 4)
+        # safe_guess = sitk.BinaryErode(guess, kernel_dimensions(1))
+	sitk.WriteImage(whole_brain, os.path.abspath('binary_whole_brain_' + fileName))
+        sitk.WriteImage(eroded_whole_brain, os.path.abspath('eroded_whole_brain_' + fileName))
+        # sitk.WriteImage(guess, os.path.abspath('guess_' + fileName))
+        sitk.WriteImage(safe_guess, os.path.abspath('final_' + fileName))
     return os.path.abspath('final_' + fileName)
 
 def getLabelList(label_file, arg_template):
@@ -274,8 +278,9 @@ def formatFMRI(dicomDirectory):
     """
     import subprocess
 
-    cmd = subprocess.Popen(['formatFMRI.sh', dicomDirectory], stdout=subprocess.PIPE)
-    outputs = cmd.stdout.read().split(" ")
+    outputs = subprocess.check_output(['formatFMRI.sh', dicomDirectory], stderr=subprocess.STDOUT).split(" ")
+    # outputs = cmd.stdout.read().split(" ")
+    # errors = cmd.stderr.read().split(" ")
     sliceOrder = outputs.pop()
     repetitionTime = outputs.pop()
     numberOfFiles = outputs.pop()

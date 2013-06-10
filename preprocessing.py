@@ -70,8 +70,8 @@ def pipeline(args):
                                         faparc2009_File=[['session_id', '10_AUTO.NN3Tv20110419',
                                                   'JOY_v51_2011', 'session_id', 'mri_nifti',
                                                   'aparc.a2009s+aseg.nii.gz']],
-                                        csfFile=[['session_id', 'CleanedDenoisedRFSegmentations',
-                                                   'allLabels_seg.nii.gz']],
+                                        csfFile=[['session_id', 'TissueClassify', 
+                                                  'masked_fixed_brainlabels_seg.nii.gz']],
                                         whmFile=[['session_id', 'ACCUMULATED_POSTERIORS',
                                                   'POSTERIOR_WM_TOTAL.nii.gz']])
     if args.pipelineOption == 'iowa':
@@ -336,7 +336,7 @@ def pipeline(args):
 
     if args.pipelineOption == 'iowa':
         # CONSTANTS
-        nacAtlasFile = "/IPLlinux/ipldev/scratch/welchdm/bld/rs-fMRI/BSA/ReferenceAtlas-build/Atlas/Atlas_20130106/template_t1.nii.gz"
+        nacAtlasFile = "/Shared/sinapse/scratch/welchdm/bld/rs-fMRI/BSA/ReferenceAtlas-build/Atlas/Atlas_20130106/template_t1.nii.gz"
 
         nacResampleResolution = (2.0, 2.0, 2.0)
         downsampledNACfilename = 'downsampledNACatlas.nii.gz'
@@ -613,7 +613,12 @@ def pipeline(args):
 
     preproc.write_graph()
     # preproc.write_hierarchical_dotfile(dotfilename='dave.dot')
-    preproc.run(plugin='MultiProc', plugin_args={'n_proc':12})
+    if os.environ['USER'] == 'dmwelch' and False:
+        # Run preprocessing on the local cluster
+        preproc.run(plugin='SGE', plugin_args={'template':os.path.join(os.getcwd(), 'ENV/bin/activate'),
+                                               'qsub_args':'-S /bin/bash -cwd'})
+    else:
+        preproc.run(plugin='MultiProc', plugin_args={'n_proc':12})
 
 if __name__ == '__main__':
 
