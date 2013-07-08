@@ -98,9 +98,9 @@ b2 load Talairach-Parameters /paulsen/Experiments/20120722_JOY_DWI/FMRI_HD_120/$
 b2 load Talairach-Box /opt/brains2/bin/talairach/vent2_box
 b2 convert Talairach-Box to Mask talbox1 talpar1
 b2 And masks m1 m2
-b2 save mask /IPLlinux/oleary/functional/BD_COGA/142005/61793711/10_AUTO.v020/61793711_CSF.mask brains2 m3
+b2 save mask /oleary/functional/BD_COGA/142005/61793711/10_AUTO.v020/61793711_CSF.mask brains2 m3
 b2 sum masks m3
-b2 save image /IPLlinux/oleary/functional/BD_COGA/142005/61793711/10_AUTO.v020/61793711_CSF.nii.gz nifti i2 data-type= unsigned-8bit plane= coronal
+b2 save image /oleary/functional/BD_COGA/142005/61793711/10_AUTO.v020/61793711_CSF.nii.gz nifti i2 data-type= unsigned-8bit plane= coronal
 
 
 

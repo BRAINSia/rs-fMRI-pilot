@@ -85,10 +85,10 @@ def generateTissueMask(input_file, low=0.0, high=1.0, erodeFlag=True):
         sitk.WriteImage(maskOnly, os.path.abspath('final_' + fileName))
     else:
         fileName = 'csfMask.nii'
-        csfLabels = [4,23]
-        final_image = image * 0
-        for label in csfLabels:
-            final_image += sitk.BinaryThreshold(image, label - 1, label)
+        # csfLabels = [4,23]
+        image1 = sitk.BinaryThreshold(image, 3, 4)
+        image2 = sitk.BinaryThreshold(image, 42, 43)
+        final_image = image1 + image2
         sitk.WriteImage(final_image, os.path.abspath('final_' + fileName))
     return os.path.abspath('final_' + fileName)
 
@@ -284,7 +284,7 @@ def formatFMRI(dicomDirectory):
 
     return modality, numberOfSlices, numberOfFiles, repetitionTime, sliceOrder
 
-def resampleImage(infile, outfile, resolution=(1.0, 1.0, 1.0)):
+def resampleImage(inputVolume, outputVolume, resolution=(1.0, 1.0, 1.0)):
     """
     Resample the image using Linear interpolation (and identity transform) to the given resolution and write out the file
 
@@ -293,22 +293,24 @@ def resampleImage(infile, outfile, resolution=(1.0, 1.0, 1.0)):
 
     import SimpleITK as sitk
 
-    image = sitk.ReadImage(infile)
-    outImage = image
+    image = sitk.ReadImage(inputVolume)
     old_size = list(image.GetSize())
     old_res = list(image.GetSpacing())
     new_res = list(resolution)
     new_size = [ int((old_size[i] * old_res[i]) / new_res[i]) for i in range(len(new_res))]
-    outImage = sitk.Resample(outImage,
-                             # transform=sitk.Transform(),
-                             outputSpacing=resolution,
-                             interpolator=sitk.sitkLinear,
-                             size=tuple(new_size),
-                             outputOrigin=image.GetOrigin(),
-                             outputDirection=image.GetDirection())
-    felements = outfile.split('.')
+
+    resampler = sitk.ResampleImageFilter()
+    resampler.SetSize(tuple(new_size))
+    resampler.SetTransform(sitk.Transform(3, sitk.sitkIdentity))
+    resampler.SetInterpolator(sitk.sitkLinear)
+    resampler.SetOutputOrigin(image.GetOrigin())
+    resampler.SetOutputSpacing(tuple(new_res))
+    resampler.SetOutputDirection(image.GetDirection())
+    outImage = resampler.Execute(image)
+
+    felements = outputVolume.split('.')
     if len(felements) == 1:
-        outfile += '.nii.gz'
-    outfile = os.path.join(os.getcwd(), outfile)
-    sitk.WriteImage(outImage, outfile)
-    return outfile
+        outputVolume += '.nii.gz'
+    outputVolume = os.path.join(os.getcwd(), outputVolume)
+    sitk.WriteImage(outImage, outputVolume)
+    return outputVolume

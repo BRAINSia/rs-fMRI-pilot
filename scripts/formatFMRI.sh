@@ -1,9 +1,23 @@
 #!/bin/bash
 
+NO_DICOM_ERROR=4
 dicomDir=$1
 MODALITY_=('fmri' 'mri' 'dti' 'none')
+
+# Determine the DICOM extension
+dicomExt="*.dcm"
+echo "Trying dcm..."
+files=($(ls -a1 $dicomDir/${dicomExt}))
+if [[ ${#files[@]} == 0 ]]; then
+    dicomExt=".*.IMA"
+    files=($(ls -a1 $dicomDir/${dicomExt}))
+    echo "IMA files"
+    if [[ ${#files[@]} == 0 ]]; then
+        return ${NO_DICOM_ERROR}
+    fi
+fi
 # Get the name of the last dicom file
-eximage=`ls -1 $dicomDir/*.dcm | head -1`
+eximage=`ls -1 $dicomDir/${dicomExt} | head -1`
 #   description
 descr=`dicom_hdr $eximage | grep "Series Description" | awk -F "/" '{print $5}'`
 #   repetition time
@@ -12,7 +26,7 @@ tr=`dicom_hdr $eximage | grep Repetition | awk -F "/" '{print $5}'`
 # Expanded grep search avoids error when sGroupArray.anMember line is incomplete and should be ignored
 nSlices=`strings $eximage | grep "sGroupArray.anMember\[[0-9]\+\][\t ]\+= [-0-9]\+" | wc | awk '{print $1}'`
 # Sort the dicom series
-images=`ls $dicomDir/*dcm | sort -t. -k 5 -n`
+images=`ls $dicomDir/${dicomExt} | sort -t. -k 5 -n`
 # Count the number of dicom files
 nimages=`echo $images | wc | awk '{print $2}'`
 
@@ -81,7 +95,16 @@ case $descr in
         modality=${MODALITY_[0]}
         label=${snum}_CONNECTIVITY
         ;;
+    Functional*)
+        modality=${MODALITY_[0]}
+        label=${snum}_CONNECTIVITY
+        ;;
+    ep2d_pace_pmu_float_conn_132_*)
+        modality=${MODALITY_[0]}
+        label=${snum}_CONNECTIVITY
+        ;;
     *)
+        echo "$descr"
         modality=${MODALITY_[3]}
         label=${snum}_Unknown
         ;;
@@ -120,11 +143,11 @@ if [ "$modality" == "fmri" ]; then
     fi
     echo "$modality $nSlices $nimages $tr $sliceOrder"
 elif  [ "$modality" == "mri" ]; then
-    # echo "$modality $type"
+    echo "$modality $type"
     exit 1
 else
-    # echo "$modality"
-    exit 1
+    echo "$modality"
+    exit 3
 fi
 
 #   case $modality in
@@ -144,3 +167,15 @@ fi
 #           ;;
 #   esac
 exit 0
+
+####JV NOTES.
+
+#Added the following for fMRI_HD_120 and PHD_120
+#    CONNECTIVITY)
+#        modality=${MODALITY_[0]}
+#        label=${snum}_CONNECTIVITY
+#        ;;
+#    Functional*)
+#        modality=${MODALITY_[0]}
+#        label=${snum}_CONNECTIVITY
+#        ;;
