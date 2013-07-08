@@ -46,44 +46,46 @@ def pipeline(args):
     ### HACK: Remove node from pipeline until Nipype/AFNI file copy issue is resolved
     # preproc.connect(sessions, 'session_id', fmri_DataSink, 'container')
     ### END HACK
-
+    outfields = ['fmri_dicom_dir', 't1_File', 'csfFile', 'whmFile']
+    if args.pipelineOption == 'csail':
+        outfields.append('faparc_File')
+        outfields.append('faparc2009_File')
     grabber = pipe.Node(interface=DataGrabber(infields=['session_id'],
-                                              outfields=['fmri_dicom_dir', 't1_File',
-                                                         'faparc_File', 'faparc2009_File', 'csfFile',
-                                                         'whmFile']), name='dataGrabber')
+                                              outfields=outfields), name='dataGrabber')
     grabber.inputs.base_directory = '/paulsen'
     grabber.inputs.template = '*'
-    site = 'FMRI_HD_024' ### HACK: site hardcoded
+    if args.pipelineOption == "iowa":
+        site = 'FMRI_HD_120'   ### JV HACK: trying to hardcode PHD_045. if doesn't work, replace with asterisk in DOUBLE quotes: "*"
+    else:
+        site = 'FMRI_HD_024' ### HACK: site hardcoded
     fmriRegex = 'MRx/{site}/*/%s/%s/%s/*'.format(site=site)
-    fS_Regex = 'Experiments/20120722_JOY_DWI/{site}/*/%s/%s/%s_*_%s_FS/%s/%s'.format(site=site)
     probRegex = 'Experiments/20130202_PREDICTHD_Results/{site}/*/%s/%s/%s'.format(site=site)
-    grabber.inputs.field_template = dict(fmri_dicom_dir=fmriRegex,
-                                         faparc_File=fS_Regex,
-                                         faparc2009_File=fS_Regex,
-                                         csfFile=probRegex,
-                                         whmFile=probRegex)
-    grabber.inputs.template_args = dict(fmri_dicom_dir=[['session_id', 'ANONRAW',
-                                                         'FMRI_RestingStateConnectivity']],
-                                        faparc_File=[['session_id', '10_AUTO.NN3Tv20110419',
-                                                  'JOY_v51_2011', 'session_id', 'mri_nifti',
-                                                  'aparc+aseg.nii.gz']],
-                                        faparc2009_File=[['session_id', '10_AUTO.NN3Tv20110419',
-                                                  'JOY_v51_2011', 'session_id', 'mri_nifti',
-                                                  'aparc.a2009s+aseg.nii.gz']],
-                                        csfFile=[['session_id', 'TissueClassify',
-                                                  'masked_fixed_brainlabels_seg.nii.gz']],
-                                        whmFile=[['session_id', 'ACCUMULATED_POSTERIORS',
-                                                  'POSTERIOR_WM_TOTAL.nii.gz']])
-    if args.pipelineOption == 'iowa':
-        # Use T1 in subject space (AutoWorkup)
-        grabber.inputs.field_template['t1_File'] = probRegex
-        grabber.inputs.template_args['t1_File'] = [['session_id', 'TissueClassify',
-                                                    't1_average_BRAINSABC.nii.gz']]
+    field_template = dict(fmri_dicom_dir=fmriRegex,
+                          csfFile=probRegex,
+                          whmFile=probRegex)
+    template_args = dict(fmri_dicom_dir=[['session_id', 'ANONRAW', 'FMRI_RestingStateConnectivity']],
+                         csfFile=[['session_id', 'TissueClassify', 'masked_fixed_brainlabels_seg.nii.gz']],      
+                         whmFile=[['session_id', 'ACCUMULATED_POSTERIORS', 'POSTERIOR_WM_TOTAL.nii.gz']])
+    if args.pipelineOption == "iowa":
+        field_template['t1_File'] = probRegex
+        template_args['t1_File'] = [['session_id', 'TissueClassify', 't1_average_BRAINSABC.nii.gz']]
     elif args.pipelineOption == 'csail':
+        # Required Freesurfer images
+        fS_Regex = 'Experiments/20120722_JOY_DWI/{site}/*/%s/%s/%s_*_%s_FS/%s/%s'.format(site=site)
+        field_template['faparc_File'] = fS_Regex
+        field_template['faparc2009_File'] = fS_Regex
+        template_args['faparc_File'] = [['session_id', '10_AUTO.NN3Tv20110419',
+                                         'JOY_v51_2011', 'session_id', 'mri_nifti',
+                                         'aparc+aseg.nii.gz']]
+        template_args['faparc2009_File'] = [['session_id', '10_AUTO.NN3Tv20110419',
+                                             'JOY_v51_2011', 'session_id', 'mri_nifti',
+                                             'aparc.a2009s+aseg.nii.gz']]
         # Use T1 in FreeSurfer space
-        grabber.inputs.field_template['t1_File'] = fS_Regex
-        grabber.inputs.template_args['t1_File'] = [['session_id', '10_AUTO.NN3Tv20110419',
-                                                    'JOY_v51_2011', 'session_id', 'mri', 'brain.mgz']]
+        field_template['t1_File'] = fS_Regex
+        template_args['t1_File'] = [['session_id', '10_AUTO.NN3Tv20110419',
+                                     'JOY_v51_2011', 'session_id', 'mri', 'brain.mgz']]
+    grabber.inputs.field_template = field_template
+    grabber.inputs.template_args = template_args
     preproc.connect(sessions, 'session_id', grabber, 'session_id')
     # CONSTANTS
     nacAtlasFile = "/paulsen/Experiments/rsFMRI/rs-fMRI-pilot/ReferenceAtlas/template_t1.nii.gz"
@@ -294,7 +296,7 @@ def pipeline(args):
 
     warpCSF = warpT1ToFMRI.clone('antsApplyTransformCSF')
     warpCSF.inputs.invert_transform_flags = [True, False]
-    preproc.connect(csfFile, 'output_file', warpCSF, 'input_image')       #10
+    preproc.connect(csfmask, 'output_file', warpCSF, 'input_image')       #10
     preproc.connect(forwardTransform, 'out', warpCSF, 'transforms')
     preproc.connect(tstat, 'out_file', warpCSF, 'reference_image')
 
@@ -318,7 +320,7 @@ def pipeline(args):
     csfAvg.inputs.outputtype = 'AFNI_1D' #outputType
     csfAvg.inputs.args = '-median' # TODO
     csfAvg.inputs.quiet = True
-    preproc.connect(csfmask, 'output_file', csfAvg, 'mask')
+    preproc.connect(warpCSF, 'output_image', csfAvg, 'mask')
     preproc.connect(fourier, 'out_file', csfAvg, 'in_file')
 
     wmAvg = pipe.Node(interface=Maskave(), name='afni3DmaskAve_wm')
@@ -370,19 +372,21 @@ def pipeline(args):
     preproc.connect(deconvolve, 'out_errts', detrend, 'in_file')          #13
 
     if args.pipelineOption == 'iowa':
+        #downsampleAtlas = pipe.Node(interface=sem.BRAINSResample(), name="brainsResample")
+        #downsampleAtlas.inputs.interpolationMode = 'Linear'
         downsampleAtlas = pipe.Node(interface=Function(function=resampleImage,
-                                                       input_names=['infile', 'outfile', 'resolution'],
-                                                       output_names=['outfile']),
-                                                       name='downsampleAtlas')
-        downsampleAtlas.inputs.infile = nacAtlasFile
-        downsampleAtlas.inputs.resolution = nacResampleResolution
-        downsampleAtlas.inputs.outfile = downsampledNACfilename
+                                                       input_names=['inputVolume', 'outputVolume', 'resolution'],
+                                                       output_names=['outputVolume']),
+            name="downsampleAtlas")
+        downsampleAtlas.inputs.inputVolume = nacAtlasFile
+        downsampleAtlas.inputs.outputVolume = downsampledNACfilename
+        downsampleAtlas.inputs.resolution = [int(x) for x in nacResampleResolution]
 
         fmriToNAC_epi = pipe.Node(interface=ApplyTransforms(), name='fmriToNac_epi')
         fmriToNAC_epi.inputs.interpolation = 'Linear'
         fmriToNAC_epi.inputs.invert_transform_flags = [False, False]
         preproc.connect(detrend, 'out_file', fmriToNAC_epi, 'input_image') # Detrend is the last NIFTI file format in the AFNI pipeline
-        preproc.connect(downsampleAtlas, 'outfile', fmriToNAC_epi, 'reference_image')
+        preproc.connect(downsampleAtlas, 'outputVolume', fmriToNAC_epi, 'reference_image')
         preproc.connect(reverseTransform, 'out', fmriToNAC_epi, 'transforms')
 
         ### Create seed points
@@ -409,7 +413,7 @@ def pipeline(args):
         spheres = pipe.Node(interface=Calc(letters=['a']),
                             name='afni3Dcalc_seeds')
         spheres.inputs.outputtype = outputType
-        preproc.connect(downsampleAtlas, 'outfile', spheres, 'in_file_a')
+        preproc.connect(downsampleAtlas, 'outputVolume', spheres, 'in_file_a')
         spheres.inputs.args = '-nscale'
 
         preproc.connect(points, 'expression', spheres, 'expr')
@@ -424,7 +428,7 @@ def pipeline(args):
         atlas_DataSink.inputs.container = 'Results'
         atlas_DataSink.inputs.parameterization = False
         preproc.connect(renameMasks, 'out_file', atlas_DataSink, 'Atlas')
-        preproc.connect(downsampleAtlas, 'outfile', atlas_DataSink, 'Atlas.@resampled')
+        preproc.connect(downsampleAtlas, 'outputVolume', atlas_DataSink, 'Atlas.@resampled')
 
         # Warp seed output to FMRI
         nacToFMRI = pipe.Node(interface=ApplyTransforms(), name="nacToFMRI")
@@ -477,7 +481,7 @@ def pipeline(args):
         fmriToNAC_label = fmriToNAC_epi.clone(name='fmriToNac_label')
         fmriToNAC_label.inputs.interpolation = 'Linear'
         fmriToNAC_label.inputs.invert_transform_flags = [False, False]
-        preproc.connect(downsampleAtlas, 'outfile', fmriToNAC_label, 'reference_image')
+        preproc.connect(downsampleAtlas, 'outputVolume', fmriToNAC_label, 'reference_image')
         preproc.connect(regionLogCalc, 'out_file', fmriToNAC_label, 'input_image')
         preproc.connect(reverseTransform, 'out', fmriToNAC_label, 'transforms')
 
