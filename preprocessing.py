@@ -55,7 +55,7 @@ def pipeline(args):
     grabber.inputs.base_directory = '/paulsen'
     grabber.inputs.template = '*'
     if args.pipelineOption == "iowa":
-        site = 'FMRI_HD_120'   ### JV HACK: trying to hardcode PHD_045. if doesn't work, replace with asterisk in DOUBLE quotes: "*"
+        site = "*"   ### JV HACK: trying to hardcode PHD_045. if doesn't work, replace with asterisk in DOUBLE quotes: "*". Undone as 7/8/2013.
     else:
         site = 'FMRI_HD_024' ### HACK: site hardcoded
     fmriRegex = 'MRx/{site}/*/%s/%s/%s/*'.format(site=site)
@@ -161,7 +161,7 @@ def pipeline(args):
     preproc.connect(to_3D, 'out_file', refit, 'in_file')
 
     #2
-    skipCount = 6                                                      #Note. Jatin changed this from 4 to 6 on April 19, 2013. temporary until final.
+    skipCount = 6                                                      #Note. JV changed this from 4 to 6 on April 19, 2013.
     def strToIntMinusOne(string):
         return int(string) - 1
 
