@@ -66,7 +66,7 @@ def pipeline(args):
                           csfFile=probRegex,
                           whmFile=probRegex)
     template_args = dict(fmri_dicom_dir=[['session_id', 'ANONRAW', 'FMRI_RestingStateConnectivity']],
-                         csfFile=[['session_id', 'TissueClassify', 'masked_fixed_brainlabels_seg.nii.gz']],
+                         csfFile=[['session_id', 'TissueClassify', 'fixed_brainlabels_seg.nii.gz']],
                          whmFile=[['session_id', 'ACCUMULATED_POSTERIORS', 'POSTERIOR_WM_TOTAL.nii.gz']])
     if args.pipelineOption == "iowa":
         field_template['t1_File'] = probRegex
