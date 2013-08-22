@@ -55,16 +55,18 @@ def pipeline(args):
     grabber.inputs.base_directory = '/paulsen'
     grabber.inputs.template = '*'
     if args.pipelineOption == "iowa":
-        site = "*"   ### JV HACK: trying to hardcode PHD_045. if doesn't work, replace with asterisk in DOUBLE quotes: "*". Undone as 7/8/2013.
+        site = "*"
+        experiment = '20130729_PREDICT_Results'
     else:
-        site = 'FMRI_HD_024' ### HACK: site hardcoded
+        site = 'FMRI_HD_024'
+        experiment = '20130202_PREDICTHD_Results'
     fmriRegex = 'MRx/{site}/*/%s/%s/%s/*'.format(site=site)
-    probRegex = 'Experiments/20130202_PREDICTHD_Results/{site}/*/%s/%s/%s'.format(site=site)
+    probRegex = 'Experiments/{experiment}/{site}/*/%s/%s/%s'.format(site=site, experiment=experiment)
     field_template = dict(fmri_dicom_dir=fmriRegex,
                           csfFile=probRegex,
                           whmFile=probRegex)
     template_args = dict(fmri_dicom_dir=[['session_id', 'ANONRAW', 'FMRI_RestingStateConnectivity']],
-                         csfFile=[['session_id', 'TissueClassify', 'masked_fixed_brainlabels_seg.nii.gz']],      
+                         csfFile=[['session_id', 'TissueClassify', 'masked_fixed_brainlabels_seg.nii.gz']],
                          whmFile=[['session_id', 'ACCUMULATED_POSTERIORS', 'POSTERIOR_WM_TOTAL.nii.gz']])
     if args.pipelineOption == "iowa":
         field_template['t1_File'] = probRegex
@@ -97,7 +99,7 @@ def pipeline(args):
                                                        outfields=['atlasToSessionTransform',
                                                                   'sessionToAtlasTransform']),
                                  name='transformGrabber')
-    transformGrabber.inputs.base_directory = '/paulsen/Experiments/20130202_PREDICTHD_Results/SubjectToAtlasWarped'
+    transformGrabber.inputs.base_directory = '/paulsen/Experiments/{experiment}/SubjectToAtlasWarped'.format(experiment=experiment)
     transformGrabber.inputs.template = '*'
     transformRegex = '%s/AtlasToSubject_%sComposite.h5'
     transformGrabber.inputs.field_template = dict(atlasToSessionTransform=transformRegex,
@@ -161,7 +163,7 @@ def pipeline(args):
     preproc.connect(to_3D, 'out_file', refit, 'in_file')
 
     #2
-    skipCount = 6                                                      #Note. JV changed this from 4 to 6 on April 19, 2013.
+    skipCount = 6
     def strToIntMinusOne(string):
         return int(string) - 1
 
