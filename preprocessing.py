@@ -27,7 +27,6 @@ def pipeline(args):
     preproc = pipe.Workflow(updatehash=True, name="workflow_" + args.name)
     preproc.base_dir = os.getcwd()
 
-    site = 'FMRI_HD_024'
     ## preprocessing_Nov1_update.sh
     sessions = pipe.Node(interface=IdentityInterface(fields=['session_id']), name='sessionIDs')
     sessions.iterables = ('session_id', sessionID)
@@ -38,9 +37,9 @@ def pipeline(args):
                                                          'whmFile']), name='dataGrabber')
     grabber.inputs.base_directory = '/paulsen'
     grabber.inputs.template = '*'
-    fmriRegex = 'MRx/{site}/*/%s/%s/%s/*'.format(site=site)
-    fS_Regex = 'Experiments/20120722_JOY_DWI/{site}/*/%s/%s/%s_*_%s_FS/%s/%s'.format(site=site)
-    probRegex = 'Experiments/20120801.SubjectOrganized_Results/{site}/*/%s/%s/%s'.format(site=site)
+    fmriRegex = 'MRx/*/*/%s/%s/%s/*'
+    fS_Regex = 'Experiments/20120722_JOY_DWI/*/*/%s/%s/%s_*_%s_FS/%s/%s'
+    probRegex = 'Experiments/20130729_PREDICT_Results/*/*/%s/%s/%s'
     grabber.inputs.field_template = dict(fmri_dicom_dir=fmriRegex,
                                          t1_File=fS_Regex,
                                          faparc_File=fS_Regex,
