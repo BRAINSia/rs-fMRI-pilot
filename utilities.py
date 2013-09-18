@@ -78,7 +78,7 @@ def generateTissueMask(input_file, low=0.0, high=1.0, erodeFlag=True):
         sitk.WriteImage(erodedMask, os.path.abspath('eroded_' + fileName))
         connected = sitk.ConnectedComponent(erodedMask)
         sortedComp = sitk.RelabelComponent(connected, 10) # HACK
-        maskOnly = sitk.BinaryThreshold(sortedComp, 1, 1)
+        maskOnly = sitk.BinaryThreshold(sortedComp, 1, 2) #JV made 1, 2
         sitk.WriteImage(binaryMask, os.path.abspath('binary_' + fileName))
         sitk.WriteImage(connected, os.path.abspath('connected_' + fileName))
         sitk.WriteImage(sortedComp, os.path.abspath('sorted_' + fileName))
