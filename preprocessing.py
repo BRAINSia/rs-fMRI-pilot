@@ -239,7 +239,6 @@ def pipeline(args):
     fourier.inputs.lowpass = 0.1
     fourier.inputs.args = '-retrend' # TODO
     fourier.inputs.outputtype = outputType
-    preproc.connect(calc, 'out_file', fourier, 'in_file')
 
     #9
     bFit = pipe.Node(interface=sem.BRAINSFit(), name='brainsFit')
@@ -323,14 +322,12 @@ def pipeline(args):
     csfAvg.inputs.args = '-median' # TODO
     csfAvg.inputs.quiet = True
     preproc.connect(warpCSF, 'output_image', csfAvg, 'mask')
-    preproc.connect(fourier, 'out_file', csfAvg, 'in_file')
 
     wmAvg = pipe.Node(interface=Maskave(), name='afni3DmaskAve_wm')
     wmAvg.inputs.outputtype = 'AFNI_1D' #outputType
     wmAvg.inputs.args = '-median' # TODO
     wmAvg.inputs.quiet = True
     preproc.connect(wmmask, 'output_file', wmAvg, 'mask')
-    preproc.connect(fourier, 'out_file', wmAvg, 'in_file')
 
     #12
     deconvolve = pipe.Node(interface=Deconvolve(fileCount=3, seriesCount=8), name='afni3Ddeconvolve')
@@ -361,7 +358,6 @@ def pipeline(args):
     deconvolve.inputs.is_stim_base_7 = True
     deconvolve.inputs.stim_label_8 = 'dP'
     deconvolve.inputs.is_stim_base_8 = True
-    preproc.connect(fourier, 'out_file', deconvolve, 'in_file')
     preproc.connect(csfAvg, 'out_file', deconvolve, 'stim_file_1')
     preproc.connect(wmAvg, 'out_file', deconvolve, 'stim_file_2')
     preproc.connect(volreg, 'oned_file', deconvolve, 'stim_file_3')
@@ -371,11 +367,15 @@ def pipeline(args):
     detrend.inputs.outputtype = outputType # 'AFNI'
     detrend.inputs.suffix = '_dt'
     detrend.inputs.args = '-polort 3' # TODO
-    preproc.connect(deconvolve, 'out_errts', detrend, 'in_file')          #13
+    preproc.connect(deconvolve, 'out_errts', detrend, 'in_file')         #13
 
     if args.pipelineOption == 'iowa':
-        #downsampleAtlas = pipe.Node(interface=sem.BRAINSResample(), name="brainsResample")
-        #downsampleAtlas.inputs.interpolationMode = 'Linear'
+        # Per Dawei, bandpass after running 3dDetrend
+        preproc.connect(calc, 'out_file', deconvolve, 'in_file')
+        preproc.connect(calc, 'out_file', csfAvg, 'in_file')
+        preproc.connect(calc, 'out_file', wmAvg, 'in_file')
+        preproc.connect(detrend, 'out_file', fourier, 'in_file')
+
         downsampleAtlas = pipe.Node(interface=Function(function=resampleImage,
                                                        input_names=['inputVolume', 'outputVolume', 'resolution'],
                                                        output_names=['outputVolume']),
@@ -387,7 +387,7 @@ def pipeline(args):
         fmriToNAC_epi = pipe.Node(interface=ApplyTransforms(), name='fmriToNac_epi')
         fmriToNAC_epi.inputs.interpolation = 'Linear'
         fmriToNAC_epi.inputs.invert_transform_flags = [False, False]
-        preproc.connect(detrend, 'out_file', fmriToNAC_epi, 'input_image') # Detrend is the last NIFTI file format in the AFNI pipeline
+        preproc.connect(fourier, 'out_file', fmriToNAC_epi, 'input_image') # Fourier is the last NIFTI file format in the AFNI pipeline
         preproc.connect(downsampleAtlas, 'outputVolume', fmriToNAC_epi, 'reference_image')
         preproc.connect(reverseTransform, 'out', fmriToNAC_epi, 'transforms')
 
@@ -453,14 +453,14 @@ def pipeline(args):
         fmri_label_DataSink.inputs.parameterization = False
         preproc.connect(sessions, 'session_id', fmri_label_DataSink, 'container')
         preproc.connect(renameMasks2, 'out_file', fmri_label_DataSink, 'masks')
-        preproc.connect(detrend, 'out_file', fmri_label_DataSink, 'masks.@detrend')
+        preproc.connect(fourier, 'out_file', fmri_label_DataSink, 'masks.@bandpass')
 
         roiMedian = pipe.Node(interface=Maskave(), name='afni_roiMedian')
         roiMedian.inputs.outputtype = 'AFNI_1D'
         roiMedian.inputs.args = '-median -mrange 1 1'  ### TODO
         roiMedian.inputs.quiet = True
         preproc.connect(nacToFMRI, 'output_image', roiMedian, 'mask')
-        preproc.connect(detrend, 'out_file', roiMedian, 'in_file')
+        preproc.connect(fourier, 'out_file', roiMedian, 'in_file')
 
         correlate = pipe.Node(interface=Fim(), name='afni_correlate')
         correlate.inputs.out = 'Correlation'
@@ -495,80 +495,13 @@ def pipeline(args):
         preproc.connect(renameZscore2, 'out_file', atlas_DataSink, 'Atlas.@zscore')
 
 
-        ### TEST
-        # ************ WARNING! The BRAINSFit transform has been reversed, but this code ******************
-        # ************ has NOT been updated!  Use with caution!                          ******************
-        # nacToT1 = nacToFMRI.clone(name='nacToT1_test')
-        # nacToT1.inputs.interpolation = 'NearestNeighbor'
-        # nacToT1.inputs.invert_transform_flags = [False]
-        # preproc.connect(spheres, 'out_file', nacToT1, 'input_image')
-        # preproc.connect(grabber, 't1_File', nacToT1, 'reference_image')
 
-        # merge1 = pipe.Node(Merger(1), name='mergeNode1')
-        # preproc.connect(transformGrabber, 'atlasToSessionTransform', merge1, 'in1')
-        # preproc.connect(merge1, 'out', nacToT1, 'transforms')
-
-        # renameMasks3 = pipe.Node(interface=Rename(format_string='%(label)s_forward'), name='renameMasksT1')
-        # renameMasks3.inputs.keep_ext = True
-        # preproc.connect(nacToT1, 'output_image', renameMasks3, 'in_file')
-        # preproc.connect(selectLabel, 'out', renameMasks3, 'label')
-
-        # t1_DataSink = fmri_DataSink.clone('t1_DataSink')
-        # t1_DataSink.inputs.base_directory = os.path.join(preproc.base_dir, 'Results') # '/paulsen/Experiments/20130417_rsfMRI_Results'
-        # t1_DataSink.inputs.parameterization = False
-        # preproc.connect(sessions, 'session_id', t1_DataSink, 'container')
-        # preproc.connect(renameMasks3, 'out_file', t1_DataSink, 'T1.@forward')
-        # preproc.connect(grabber, 't1_File', t1_DataSink, 'T1.@T1image')
-
-        # t1ToFMRI = nacToFMRI.clone(name='t1ToFMRI_test')
-        # t1ToFMRI.inputs.interpolation = 'NearestNeighbor'
-        # t1ToFMRI.inputs.invert_transform_flags = [False]
-        # preproc.connect(nacToT1, 'output_image', t1ToFMRI, 'input_image')
-        # preproc.connect(warpT1ToFMRI, 'output_image', t1ToFMRI, 'reference_image')
-
-        # fmriToT1 = nacToFMRI.clone(name='fmriToT1_test')
-        # fmriToT1.inputs.interpolation = 'NearestNeighbor'
-        # fmriToT1.inputs.invert_transform_flags = [True]
-        # preproc.connect(t1ToFMRI, 'output_image', fmriToT1, 'input_image')
-        # preproc.connect(grabber, 't1_File', fmriToT1, 'reference_image')
-
-        # merge2 = pipe.Node(Merger(1), name='mergeNode2')
-        # preproc.connect(bFit, 'outputTransform', merge2, 'in1')
-        # preproc.connect(merge2, 'out', fmriToT1, 'transforms')
-        # preproc.connect(merge2, 'out', t1ToFMRI, 'transforms')
-
-        # renameMasks4 = pipe.Node(interface=Rename(format_string='%(label)s_reverse'), name='renameMasksT1_2')
-        # renameMasks4.inputs.keep_ext = True
-        # preproc.connect(fmriToT1, 'output_image', renameMasks4, 'in_file')
-        # preproc.connect(selectLabel, 'out', renameMasks4, 'label')
-
-        # preproc.connect(renameMasks4, 'out_file', t1_DataSink, 'T1.@reverse')
-
-        # t1ToNAC_test = fmriToNAC_epi.clone('t1ToNAC_test')
-        # t1ToNAC_test.inputs.interpolation = 'NearestNeighbor'
-        # t1ToNAC_test.inputs.invert_transform_flags = [False]
-        # preproc.connect(fmriToT1, 'output_image', t1ToNAC_test, 'input_image')
-        # preproc.connect(downsampleAtlas, 'outfile', t1ToNAC_test, 'reference_image')
-
-        # merge3 = pipe.Node(Merger(1), name='mergeNode3')
-        # preproc.connect(transformGrabber, 'sessionToAtlasTransform', merge3, 'in1')
-        # preproc.connect(merge3, 'out', t1ToNAC_test, 'transforms')
-
-        # renameMasks30 = pipe.Node(interface=Rename(format_string='%(label)s_reverse_mask'), name='renameMasksT1ToNACmask')
-        # renameMasks30.inputs.keep_ext = True
-        # preproc.connect(t1ToNAC_test, 'output_image', renameMasks30, 'in_file')
-        # preproc.connect(selectLabel, 'out', renameMasks30, 'label')
-        # preproc.connect(renameMasks30, 'out_file', atlas_DataSink, 'Atlas.@reverse')
-
-        # fmriToNAC_test = fmriToNAC_epi.clone(name='fmriToNac_test')
-        # fmriToNAC_test.inputs.interpolation = 'NearestNeighbor'
-        # fmriToNAC_test.inputs.invert_transform_flags = [False, True]
-        # preproc.connect(downsampleAtlas, 'outfile', fmriToNAC_test, 'reference_image')
-        # preproc.connect(nacToFMRI, 'output_image', fmriToNAC_test, 'input_image')
-        # preproc.connect(reverseTransform, 'out', fmriToNAC_test, 'transforms')
-        ### END TEST
 
     elif args.pipelineOption == 'csail':
+        preproc.connect(calc, 'out_file', fourier, 'in_file')
+        preproc.connect(fourier, 'out_file', csfAvg, 'in_file')
+        preproc.connect(fourier, 'out_file', wmAvg, 'in_file')
+        preproc.connect(fourier, 'out_file', deconvolve, 'in_file')
 
         warpFS1 = pipe.Node(interface=ApplyTransforms(), name='antsApplyTransformsFS1')
         warpFS1.inputs.interpolation='MultiLabel'
