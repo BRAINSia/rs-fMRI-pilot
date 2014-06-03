@@ -314,3 +314,19 @@ def resampleImage(inputVolume, outputVolume, resolution=(1.0, 1.0, 1.0)):
     outputVolume = os.path.join(os.getcwd(), outputVolume)
     sitk.WriteImage(outImage, outputVolume)
     return outputVolume
+
+
+def clipSeedWithVentricles(unclipped_seed_fn, fmriBABCSeg_fn, desired_out_seed_fn):
+    """
+    This function takes in a seed image, and a BRAINSABC tissue segmentation image
+    threasholds the CSF component (ie. label=4) and then clips the
+    """
+    import SimpleITK as sitk
+    import os
+    ucs = sitk.ReadImage(unclipped_seed_fn)
+    seg = sitk.ReadImage(fmriBABCSeg_fn)
+    csf_seg = sitk.BinaryThreshold(seg,4,4)
+    cs = ucs * sitk.Cast( (1 - csf_seg ), ucs.GetPixelIDValue() )
+    clipped_seed_fn = os.path.abspath(desired_out_seed_fn)
+    sitk.WriteImage(cs, clipped_seed_fn )
+    return clipped_seed_fn
