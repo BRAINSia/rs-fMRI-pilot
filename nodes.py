@@ -85,7 +85,7 @@ def sessionNode(outputType):
                                               outfields=['fmri_dicom_dir', 't1_file',
                                                          'csf_file', 'wm_file']),
                         name='dataGrabber')
-    grabber.inputs.base_directory = '/paulsen'
+    grabber.inputs.base_directory = '/Shared/paulsen'
     grabber.inputs.template = '*'
     grabber.inputs.field_template = dict(fmri_dicom_dir='MRx/FMRI_HD_120/*/%s/%s/%s/*',
                                          t1_file='Experiments/20120722_JOY_DWI/FMRI_HD_120/*/%s/%s/%s_*_%s_FS/mri/T1.mgz',

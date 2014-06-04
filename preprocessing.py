@@ -37,7 +37,7 @@ def pipeline(args):
     fmri_DataSink = pipe.Node(interface=DataSink(), name="fmri_DataSink")
     fmri_DataSink.overwrite = REWRITE_DATASINKS
     ### HACK: Remove node from pipeline until Nipype/AFNI file copy issue is resolved
-    # fmri_DataSink.inputs.base_directory = os.path.join(preproc.base_dir, RESULTS_DIR, 'fmri') # '/paulsen/Experiments/20130417_rsfMRI_Results'
+    # fmri_DataSink.inputs.base_directory = os.path.join(preproc.base_dir, RESULTS_DIR, 'fmri') # '/Shared/paulsen/Experiments/20130417_rsfMRI_Results'
     # fmri_DataSink.inputs.substitutions = [('to_3D_out+orig', 'to3D')]
     # fmri_DataSink.inputs.parameterization = False
     ### END HACK
@@ -52,7 +52,7 @@ def pipeline(args):
 
     grabber = pipe.Node(interface=DataGrabber(infields=['session_id'],
                                               outfields=outfields), name='dataGrabber')
-    grabber.inputs.base_directory = '/paulsen'  ## TODO:  Replace with /Shared/paulsen
+    grabber.inputs.base_directory = '/Shared/paulsen'  ## TODO:  Replace with /Shared/paulsen
     grabber.inputs.template = '*'
 
     site = "*"
@@ -74,8 +74,8 @@ def pipeline(args):
     grabber.inputs.template_args = template_args
     preproc.connect(sessions, 'session_id', grabber, 'session_id')
     # CONSTANTS
-    nacAtlasFile = "/paulsen/Experiments/rsFMRI/rs-fMRI-pilot/ReferenceAtlas/template_t1.nii.gz"
-    nacAtlasLabel = "/paulsen/Experiments/rsFMRI/rs-fMRI-pilot/ReferenceAtlas/template_nac_labels.nii.gz"
+    nacAtlasFile = "/Shared/paulsen/Experiments/rsFMRI/rs-fMRI-pilot/ReferenceAtlas/template_t1.nii.gz"
+    nacAtlasLabel = "/Shared/paulsen/Experiments/rsFMRI/rs-fMRI-pilot/ReferenceAtlas/template_nac_labels.nii.gz"
     nacResampleResolution = (2.0, 2.0, 2.0)
     downsampledNACfilename = 'downsampledNACatlas.nii.gz'
     # WORKFLOW
@@ -83,7 +83,7 @@ def pipeline(args):
                                                        outfields=['atlasToSessionTransform',
                                                                   'sessionToAtlasTransform']),
                                  name='transformGrabber')
-    transformGrabber.inputs.base_directory = '/paulsen/Experiments/{experiment}/SubjectToAtlasWarped'.format(experiment=experiment)
+    transformGrabber.inputs.base_directory = '/Shared/paulsen/Experiments/{experiment}/SubjectToAtlasWarped'.format(experiment=experiment)
     transformGrabber.inputs.template = '*'
     transformRegex = '%s/AtlasToSubject_%sComposite.h5'
     transformGrabber.inputs.field_template = dict(atlasToSessionTransform=transformRegex,
@@ -465,7 +465,7 @@ def pipeline(args):
     preproc.connect(spheres, 'out_file', renameMasks, 'in_file')
 
     atlas_DataSink = pipe.Node(interface=DataSink(), name="atlas_DataSink")
-    atlas_DataSink.inputs.base_directory = preproc.base_dir # '/paulsen/Experiments/20130417_rsfMRI_Results'
+    atlas_DataSink.inputs.base_directory = preproc.base_dir # '/Shared/paulsen/Experiments/20130417_rsfMRI_Results'
     atlas_DataSink.inputs.container = RESULTS_DIR
     atlas_DataSink.inputs.parameterization = False
     atlas_DataSink.overwrite = REWRITE_DATASINKS
@@ -500,7 +500,7 @@ def pipeline(args):
     # Labels are iterated over, so we need a seperate datasink to avoid overwriting any preprocessing
     # results when the labels are iterated (e.g. To3d output)
     fmri_label_DataSink = pipe.Node(interface=DataSink(), name='fmri_label_DataSink')
-    fmri_label_DataSink.inputs.base_directory = os.path.join(preproc.base_dir, RESULTS_DIR, 'EPI') # '/paulsen/Experiments/20130417_rsfMRI_Results/EPI'
+    fmri_label_DataSink.inputs.base_directory = os.path.join(preproc.base_dir, RESULTS_DIR, 'EPI') # '/Shared/paulsen/Experiments/20130417_rsfMRI_Results/EPI'
     fmri_label_DataSink.inputs.parameterization = False
     fmri_label_DataSink.overwrite = REWRITE_DATASINKS
     preproc.connect(sessions, 'session_id', fmri_label_DataSink, 'container')
