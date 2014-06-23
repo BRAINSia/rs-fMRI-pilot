@@ -26,6 +26,7 @@ def pipeline(args):
     sessionID = args.sessionID
     outputType = args.outputType
     fOutputType = args.fOutputType
+    assert isinstance(args.maskGM, bool)
     maskGM = args.maskGM
     print args.name
     CACHE_DIR = "workflow_" + args.name  # Cache directory
@@ -37,7 +38,8 @@ def pipeline(args):
     fmri_DataSink = pipe.Node(interface=DataSink(), name="fmri_DataSink")
     fmri_DataSink.overwrite = REWRITE_DATASINKS
     ### HACK: Remove node from pipeline until Nipype/AFNI file copy issue is resolved
-    # fmri_DataSink.inputs.base_directory = os.path.join(preproc.base_dir, RESULTS_DIR, 'fmri') # '/Shared/paulsen/Experiments/20130417_rsfMRI_Results'
+    # fmri_DataSink.inputs.base_directory = os.path.join(preproc.base_dir, RESULTS_DIR, 'fmri')
+    # '/Shared/paulsen/Experiments/20130417_rsfMRI_Results'
     # fmri_DataSink.inputs.substitutions = [('to_3D_out+orig', 'to3D')]
     # fmri_DataSink.inputs.parameterization = False
     ### END HACK
@@ -49,27 +51,25 @@ def pipeline(args):
     # preproc.connect(sessions, 'session_id', fmri_DataSink, 'container')
     ### END HACK
     outfields = ['fmri_dicom_dir', 't1_File', 'csfFile', 'whmFile']
+    if maskGM:
+        outfields.append('gryFile')
 
     grabber = pipe.Node(interface=DataGrabber(infields=['session_id'],
                                               outfields=outfields), name='dataGrabber')
     grabber.inputs.base_directory = '/Shared/paulsen'  ## TODO:  Replace with /Shared/paulsen
     grabber.inputs.template = '*'
-
     site = "*"
     experiment = '20130729_PREDICT_Results'
-
     fmriRegex = 'MRx/{site}/*/%s/%s/%s/*'.format(site=site)
     probRegex = 'Experiments/{experiment}/{site}/*/%s/%s/%s'.format(site=site, experiment=experiment)
     field_template = dict(fmri_dicom_dir=fmriRegex,
                           csfFile=probRegex,
-                          whmFile=probRegex,
-                          gryFile=probRegex)
+                          whmFile=probRegex)
     template_args = dict(fmri_dicom_dir=[['session_id', 'ANONRAW', 'FMRI_RestingStateConnectivity']],
                          csfFile=[['session_id', 'TissueClassify', 'fixed_brainlabels_seg.nii.gz']],
                          whmFile=[['session_id', 'ACCUMULATED_POSTERIORS', 'POSTERIOR_WM_TOTAL.nii.gz']])
     field_template['t1_File'] = probRegex
     template_args['t1_File'] = [['session_id', 'TissueClassify', 't1_average_BRAINSABC.nii.gz']]
-
     grabber.inputs.field_template = field_template
     grabber.inputs.template_args = template_args
     preproc.connect(sessions, 'session_id', grabber, 'session_id')
@@ -312,12 +312,13 @@ def pipeline(args):
 
     if maskGM:
         #------------------------------ GRAY MATTER MASK ------------------------------
-        grabber.template_args['grmFile'] = [['session_id', 'ACCUMULATED_POSTERIORS', 'POSTERIOR_GM_TOTAL.nii.gz']]
+        grabber.inputs.field_template['gryFile'] = probRegex
+        grabber.inputs.template_args['gryFile'] = [['session_id', 'ACCUMULATED_POSTERIORS', 'POSTERIOR_GM_TOTAL.nii.gz']]
         # For cerebrum gray matter ONLY:
-        # grabber.template_args['grmFile'] = [['session_id', 'TissueClassify', 'POSTERIOR_SURFGM.nii.gz']]
+        # grabber.inputs.template_args['gryFile'] = [['session_id', 'TissueClassify', 'POSTERIOR_SURFGM.nii.gz']]
         warpGRM = warpT1ToFMRI.clone('antsApplyTransformGRM')
         warpGRM.inputs.invert_transform_flags = [True, False]
-        preproc.connect(grabber, 'grmFile', warpGRM, 'input_image')
+        preproc.connect(grabber, 'gryFile', warpGRM, 'input_image')
         preproc.connect(tstat, 'out_file', warpGRM, 'reference_image')
         preproc.connect(forwardTransformT1ToFMRI, 'out', warpGRM, 'transforms')
 
@@ -562,14 +563,14 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Preprocessing script for resting state fMRI')
     parser.add_argument('-f', help='Force DataSink rewriting', dest='REWRITE_DATASINKS', action='store_true', required=False)
+    parser.add_argument('-g', '--gray', action='store_true', dest='maskGM', required=False, default=False,
+                        help='flag to run preprocessing with global signal regression by masking gray matter')
     parser.add_argument('-t', '--filetype', action='store', dest='outputType', type=str, required=False,
                         default='NIFTI', help='File type for outputs.  Values: "NIFTI_GZ", "AFNI", "NIFTI" (default)')
     parser.add_argument('-n','--name', action='store', dest='name', type=str, required=True,
                         help='Name (required)')
     parser.add_argument('-s', '--session', action='store', dest='sessionID', type=str, required=True,
                         nargs='*', help='list of session IDs (required)')
-    parser.add_argument('-g', '--gray', action='store_true', dest='maskGM', required=False, default=False,
-                        help='flag to run preprocessing with global signal regression by masking gray matter')
     args = parser.parse_args()
     freesurferOutputTypes = {"NIFTI_GZ" : "niigz",
                              "AFNI" : "afni",
