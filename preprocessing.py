@@ -414,6 +414,8 @@ def pipeline(args):
     preproc.connect(calc, 'out_file', deconvolve, 'in_file')
     preproc.connect(calc, 'out_file', csfAvg, 'in_file')
     preproc.connect(calc, 'out_file', wmAvg, 'in_file')
+    if maskGM:
+        preproc.connect(calc, 'out_file', gmAvg, 'in_file')
     preproc.connect(detrend, 'out_file', fourier, 'in_file')
 
     downsampleAtlas = pipe.Node(interface=Function(function=resampleImage,
