@@ -317,7 +317,7 @@ def pipeline(args):
         # For cerebrum gray matter ONLY:
         # grabber.inputs.template_args['gryFile'] = [['session_id', 'TissueClassify', 'POSTERIOR_SURFGM.nii.gz']]
         warpGRM = warpT1ToFMRI.clone('antsApplyTransformGRM')
-        warpGRM.inputs.invert_transform_flags = [True, False]
+        warpGRM.inputs.invert_transform_flags = [True]
         preproc.connect(grabber, 'gryFile', warpGRM, 'input_image')
         preproc.connect(tstat, 'out_file', warpGRM, 'reference_image')
         preproc.connect(forwardTransformT1ToFMRI, 'out', warpGRM, 'transforms')
