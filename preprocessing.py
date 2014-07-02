@@ -269,12 +269,14 @@ def pipeline(args):
 
     #10
     csfmask = pipe.Node(interface=Function(function=generateTissueMask,
-                                           input_names=['input_file','low', 'high', 'erodeFlag'],
+                                           input_names=['input_file', 'fileName', 'low', 'high', 'erodeFlag', 'binary'],
                                            output_names=['output_file']),
                         name='csfMask')
-    csfmask.inputs.low = 0.99
-    csfmask.inputs.high = 1.0
+    csfmask.inputs.fileName = 'csfMask.nii'
+    csfmask.inputs.low = 3
+    csfmask.inputs.high = 42
     csfmask.inputs.erodeFlag = False
+    csfmask.inputs.binary = True
     csfmask.inputs.input_file = nacAtlasLabel
 
     warpAtlasCSF = warpT1ToFMRI.clone('antsApplyTransformCSF')
@@ -290,12 +292,14 @@ def pipeline(args):
 
     #11
     wmmask = pipe.Node(interface=Function(function=generateTissueMask,
-                                           input_names=['input_file','low', 'high', 'erodeFlag'],
+                                           input_names=['input_file', 'fileName', 'low', 'high', 'erodeFlag', 'binary'],
                                            output_names=['output_file']),
                         name='wmMask')
+    wmmask.inputs.fileName = 'whiteMatterMask.nii'
     wmmask.inputs.low = 0.99
     wmmask.inputs.high = 1.0
     wmmask.inputs.erodeFlag = True
+    wmmask.inputs.binary = False
     preproc.connect(warpWHM, 'output_image', wmmask, 'input_file')        #11
 
     csfAvg = pipe.Node(interface=Maskave(), name='afni3DmaskAve_csf')
@@ -323,12 +327,14 @@ def pipeline(args):
         preproc.connect(forwardTransformT1ToFMRI, 'out', warpGRM, 'transforms')
 
         grmmask = pipe.Node(interface=Function(function=generateTissueMask,
-                                               input_names=['input_file','low', 'high', 'erodeFlag'],
+                                               input_names=['input_file', 'fileName', 'low', 'high', 'erodeFlag', 'binary'],
                                                output_names=['output_file']),
                             name='grmMask')
+        grmmask.inputs.fileName = 'grmMask.nii'
         grmmask.inputs.low = 0.99
         grmmask.inputs.high = 1.0
         grmmask.inputs.erodeFlag = False
+        grmmask.inputs.binary = False
         preproc.connect(warpGRM, 'output_image', grmmask, 'input_file')
 
         grmAvg = pipe.Node(interface=Maskave(), name='afni3DmaskAve_grm')

@@ -57,7 +57,7 @@ def dicomRead(infolder):
     raise Exception('None of the dicom files in %s contain \
                     "Repetition Time" where PyDicom can find it!' % infolder)
 
-def generateTissueMask(input_file, low=0.0, high=1.0, erodeFlag=True):
+def generateTissueMask(input_file, fileName, low=0.0, high=1.0, erodeFlag=True, binary=False):
     """
     Using posterior tissue probability file, threshold by
     a low and/or high value, erode by 2mm, and take the ceil()
@@ -67,30 +67,32 @@ def generateTissueMask(input_file, low=0.0, high=1.0, erodeFlag=True):
     import SimpleITK as sitk
     assert (isinstance(input_file[0], str)), input_file
     image = sitk.ReadImage(input_file)
+    out_file = os.path.abspath('final_' + fileName)
     ## Compute brain mask
     inValue = 1
     outValue = 0
-    binaryMask = sitk.BinaryThreshold(image, low, high)
-    if erodeFlag:
-        fileName = 'whiteMatterMask.nii'
-        radiusMM = 1
-        erodedMask = sitk.BinaryErode(binaryMask, radiusMM)
-        sitk.WriteImage(erodedMask, os.path.abspath('eroded_' + fileName))
-        connected = sitk.ConnectedComponent(erodedMask)
-        sortedComp = sitk.RelabelComponent(connected, 10) # HACK
-        maskOnly = sitk.BinaryThreshold(sortedComp, 1, 2) #JV made 1, 2
-        sitk.WriteImage(binaryMask, os.path.abspath('binary_' + fileName))
-        sitk.WriteImage(connected, os.path.abspath('connected_' + fileName))
-        sitk.WriteImage(sortedComp, os.path.abspath('sorted_' + fileName))
-        sitk.WriteImage(maskOnly, os.path.abspath('final_' + fileName))
-    else:
-        fileName = 'csfMask.nii'
+    if binary: # CSF label
         # csfLabels = [4,23]
-        image1 = sitk.BinaryThreshold(image, 3, 4)
-        image2 = sitk.BinaryThreshold(image, 42, 43)
+        image1 = sitk.BinaryThreshold(image, low, low + 1)
+        image2 = sitk.BinaryThreshold(image, high, high + 1)
         final_image = image1 + image2
-        sitk.WriteImage(final_image, os.path.abspath('final_' + fileName))
-    return os.path.abspath('final_' + fileName)
+        sitk.WriteImage(final_image, out_file)
+    else:
+        binaryMask = sitk.BinaryThreshold(image, low, high)
+        if erodeFlag:  # White matter
+            radiusMM = 1
+            erodedMask = sitk.BinaryErode(binaryMask, radiusMM)
+            sitk.WriteImage(erodedMask, os.path.abspath('eroded_' + fileName))
+            connected = sitk.ConnectedComponent(erodedMask)
+            sortedComp = sitk.RelabelComponent(connected, 10) # HACK
+            maskOnly = sitk.BinaryThreshold(sortedComp, 1, 2) #JV made 1, 2
+            sitk.WriteImage(binaryMask, os.path.abspath('binary_' + fileName))
+            sitk.WriteImage(connected, os.path.abspath('connected_' + fileName))
+            sitk.WriteImage(sortedComp, os.path.abspath('sorted_' + fileName))
+            sitk.WriteImage(maskOnly, out_file)
+        else:  # Gray matter
+            sitk.WriteImage(binaryMask, out_file)
+    return out_file
 
 def getLabelList(label_file, arg_template):
     import os
