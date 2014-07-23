@@ -57,7 +57,7 @@ def dicomRead(infolder):
     raise Exception('None of the dicom files in %s contain \
                     "Repetition Time" where PyDicom can find it!' % infolder)
 
-def generateTissueMask(input_file, fileName, low=0.0, high=1.0, erodeFlag=True, binary=False):
+def generateTissueMask(input_file, fileName, low=0.0, high=1.0, erodeFlag=False, binary=False, largest=False):
     """
     Using posterior tissue probability file, threshold by
     a low and/or high value, erode by 2mm, and take the ceil()
@@ -89,6 +89,14 @@ def generateTissueMask(input_file, fileName, low=0.0, high=1.0, erodeFlag=True, 
             sitk.WriteImage(binaryMask, os.path.abspath('binary_' + fileName))
             sitk.WriteImage(connected, os.path.abspath('connected_' + fileName))
             sitk.WriteImage(sortedComp, os.path.abspath('sorted_' + fileName))
+            sitk.WriteImage(maskOnly, out_file)
+        elif largest:
+            sitk.WriteImage(binaryMask, os.path.abspath('binary_' + fileName))
+            connected = sitk.ConnectedComponent(binaryMask)
+            sitk.WriteImage(connected, os.path.abspath('connected_' + fileName))
+            sortedComp = sitk.RelabelComponent(connected, 300)
+            sitk.WriteImage(sortedComp, os.path.abspath('sorted_' + fileName))
+            maskOnly = sitk.BinaryThreshold(sortedComp, 1, 2)
             sitk.WriteImage(maskOnly, out_file)
         else:  # Gray matter
             sitk.WriteImage(binaryMask, out_file)
