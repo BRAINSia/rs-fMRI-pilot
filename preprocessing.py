@@ -1,10 +1,8 @@
 #!/usr/bin/env python
-# emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
-# vi: set ft=python sts=4 ts=4 sw=4 et:
 """
 Usage:
   preprocessing.py [-h | --help]
-  preprocessing.py [-f | --force] [-g | -b] [-F FORMAT | --format=FORMAT] (-n NAME| --name=NAME) SESSION...
+  preprocessing.py [-f | --force] [-g | -b] [-w] [-F FORMAT | --format=FORMAT] (-n NAME| --name=NAME) SESSION...
 
 Arguments:
   -n NAME, --name=NAME        experiment name
@@ -15,14 +13,16 @@ Optional:
   -f, --force                 force DataSink rewriting
   -g                          global signal regression by masking gray matter
   -b                          whole brain
+  -w                          mask white matter from seeds
   -F FORMAT, --format=FORMAT  output format, values: afni, nifti, nifti_gz [default: nifti]
 
 Example:
   preprocessing.py -n my_new_experiment 0001 0002 0003
   preprocessing.py -fgF nifti_gz --name new_experiment_w_gray_mask 00001 00002 00003
   preprocessing.py -bn my_new_experiment_brain_mask --format afni 0001 0002 0003
+
 """
-### TODO: Modify virtualenv to include formatFMRI.sh
+# TODO: Modify virtualenv to include formatFMRI.sh
 import os
 import sys
 
@@ -46,6 +46,7 @@ def pipeline(args):
     fOutputType = args['freesurfer']
     maskGM = args['g']
     maskWholeBrain = args['b']
+    maskWhiteMatterFromSeeds = args['w']
     print args['name']
     CACHE_DIR = "workflow_" + args['name']  # Cache directory
     RESULTS_DIR = args['name'] + "_Results"  # Universal datasink directory
@@ -55,19 +56,19 @@ def pipeline(args):
 
     fmri_DataSink = pipe.Node(interface=DataSink(), name="fmri_DataSink")
     fmri_DataSink.overwrite = REWRITE_DATASINKS
-    ### HACK: Remove node from pipeline until Nipype/AFNI file copy issue is resolved
+    # HACK: Remove node from pipeline until Nipype/AFNI file copy issue is resolved
     # fmri_DataSink.inputs.base_directory = os.path.join(preproc.base_dir, RESULTS_DIR, 'fmri')
     # '/Shared/paulsen/Experiments/20130417_rsfMRI_Results'
     # fmri_DataSink.inputs.substitutions = [('to_3D_out+orig', 'to3D')]
     # fmri_DataSink.inputs.parameterization = False
-    ### END HACK
+    # END HACK
 
     sessions = pipe.Node(interface=IdentityInterface(fields=['session_id']), name='sessionIDs')
     sessions.iterables = ('session_id', sessionID)
 
-    ### HACK: Remove node from pipeline until Nipype/AFNI file copy issue is resolved
+    # HACK: Remove node from pipeline until Nipype/AFNI file copy issue is resolved
     # preproc.connect(sessions, 'session_id', fmri_DataSink, 'container')
-    ### END HACK
+    # END HACK
     outfields = ['fmri_dicom_dir', 't1_File', 'csfFile', 'whmFile']
     if maskGM:
         outfields.append('gryFile')
@@ -75,7 +76,7 @@ def pipeline(args):
         pass  # No need for grabber, we're using NAC-atlas file
     grabber = pipe.Node(interface=DataGrabber(infields=['session_id'],
                                               outfields=outfields), name='dataGrabber')
-    grabber.inputs.base_directory = '/Shared/paulsen'  ## TODO:  Replace with /Shared/paulsen
+    grabber.inputs.base_directory = '/Shared/paulsen'  # TODO:  Replace with /Shared/paulsen
     grabber.inputs.template = '*'
     site = "*"
     experiment = '20130729_PREDICT_Results'
@@ -102,7 +103,8 @@ def pipeline(args):
                                                        outfields=['atlasToSessionTransform',
                                                                   'sessionToAtlasTransform']),
                                  name='transformGrabber')
-    transformGrabber.inputs.base_directory = '/Shared/paulsen/Experiments/{experiment}/SubjectToAtlasWarped'.format(experiment=experiment)
+    transformGrabber.inputs.base_directory = '/Shared/paulsen/Experiments/{experiment}/SubjectToAtlasWarped'.format(
+        experiment=experiment)
     transformGrabber.inputs.template = '*'
     transformRegex = '%s/AtlasToSubject_%sComposite.h5'
     transformGrabber.inputs.field_template = dict(atlasToSessionTransform=transformRegex,
@@ -111,11 +113,10 @@ def pipeline(args):
                                                  sessionToAtlasTransform=[['session_id', 'Inverse']])
     preproc.connect(sessions, 'session_id', transformGrabber, 'session_id')
 
-    ### NOTE: antsApplyTransforms takes transforms in REVERSE order!!!
+    # NOTE: antsApplyTransforms takes transforms in REVERSE order!!!
     # Concatenate transforms: NAC -> T1 -> fMRI
     forwardTransform = pipe.Node(Merger(2), name='0_List_forwardTransformNACToFMRI')
     preproc.connect(transformGrabber, 'atlasToSessionTransform', forwardTransform, 'in2')
-
 
     # Concatenate transforms: NAC <- T1 <- fMRI
     reverseTransform = pipe.Node(Merger(2), name='0_List_reverseTransformFMRIToNAC')
@@ -134,7 +135,7 @@ def pipeline(args):
                                              output_names=['out_string']),
                           name='strCreate')
     to_3D_str.inputs.time = 'zt'
-    preproc.connect(formatFMRINode, 'numberOfSlices', to_3D_str, 'slices')                 #1
+    preproc.connect(formatFMRINode, 'numberOfSlices', to_3D_str, 'slices')  # 1
     preproc.connect(formatFMRINode, 'numberOfFiles', to_3D_str, 'volumes')
     preproc.connect(formatFMRINode, 'repetitionTime', to_3D_str, 'repTime')
     preproc.connect(formatFMRINode, 'sliceOrder', to_3D_str, 'order')
@@ -151,22 +152,23 @@ def pipeline(args):
     preproc.connect(grabber, 'fmri_dicom_dir', to_3D, 'infolder')
     preproc.connect(to_3D_str, 'out_string', to_3D, 'funcparams')
 
-    ### HACK: Remove node from pipeline until Nipype/AFNI file copy issue is resolved
+    # HACK: Remove node from pipeline until Nipype/AFNI file copy issue is resolved
     # renameTo3D = pipe.Node(Rename(format_string='%(session)s_to3D'), name='renameTo3D')
     # renameTo3D.inputs.keep_ext = True
     # preproc.connect(to_3D, 'out_file', renameTo3D, 'in_file')
     # preproc.connect(sessions, 'session_id', renameTo3D, 'session')
     # preproc.connect(renameTo3D, 'out_file', fmri_DataSink, '@To3D')
-    ### END HACK
+    # END HACK
 
-    #1a
+    # 1a
     refit = pipe.Node(interface=Refit(), name='afni3Drefit')
     refit.inputs.outputtype = 'AFNI'
     refit.inputs.deoblique = True
     preproc.connect(to_3D, 'out_file', refit, 'in_file')
 
-    #2
+    # 2
     skipCount = 6
+
     def strToIntMinusOne(string):
         return int(string) - 1
 
@@ -179,10 +181,10 @@ def pipeline(args):
     preproc.connect(refit, 'out_file', despike, 'in_file')
     preproc.connect(formatFMRINode, ('numberOfFiles', strToIntMinusOne), despike, 'end')
 
-    #3
+    # 3
     volreg = pipe.Node(interface=Volreg(), name='afni3DvolReg')
     volreg.inputs.outputtype = outputType
-    volreg.inputs.timeshift = False # 0
+    volreg.inputs.timeshift = False  # 0
     volreg.inputs.zpad = 3
     volreg.inputs.interp = 'cubic'
     volreg.inputs.maxite = 50
@@ -196,37 +198,38 @@ def pipeline(args):
     volreg.inputs.coarserot = True
     volreg.inputs.base = 9
     volreg.inputs.oned_file = 'volReg.1D'
-    preproc.connect(despike, 'out_file', volreg, 'in_file')               #3
+    preproc.connect(despike, 'out_file', volreg, 'in_file')  # 3
 
-    #4
+    # 4
     zpad = pipe.Node(interface=Zeropad(), name='afniZeropad')
     zpad.inputs.plane = 'IS'
     zpad.inputs.numberOfPlanes = 44
     zpad.inputs.is_mm = False
-    preproc.connect(volreg, 'out_file', zpad, 'in_file')                  #4
+    preproc.connect(volreg, 'out_file', zpad, 'in_file')  # 4
 
-    #5
+    # 5
     merge = pipe.Node(interface=Merge(), name='afni3Dmerge')
     merge.inputs.outputtype = outputType
     merge.inputs.blurfwhm = 6
     merge.inputs.doall = True
-    merge.inputs.args = '-1noneg -1clip 100' # TODO
+    merge.inputs.args = '-1noneg -1clip 100'  # TODO
     # TODO: implement
     # merge.inputs.onenoneg = True
     # merge.inputs.oneclip = 100
-    preproc.connect(zpad, 'out_file', merge, 'in_files')                  #5 ### NOTE: ONLY ONE FILE TO in_files. JV changed blurr back to 6 on 5/14/2013.
+    # 5 ### NOTE: ONLY ONE FILE TO in_files. JV changed blurr back to 6 on 5/14/2013.
+    preproc.connect(zpad, 'out_file', merge, 'in_files')
 
-    #6
+    # 6
     automask = pipe.Node(interface=Automask(), name='afni3Dautomask')
     automask.inputs.outputtype = outputType
     automask.inputs.dilate = 1
-    preproc.connect(merge, 'out_file', automask, 'in_file')               #6
+    preproc.connect(merge, 'out_file', automask, 'in_file')  # 6
 
-    #7
+    # 7
     tstat = pipe.Node(interface=TStat(), name='afni3DtStat')
     tstat.inputs.outputtype = outputType
-    tstat.inputs.args = '-mean' # TODO
-    preproc.connect(merge, 'out_file', tstat, 'in_file')                  #7 ### 'mean_file' -> 'in_file'
+    tstat.inputs.args = '-mean'  # TODO
+    preproc.connect(merge, 'out_file', tstat, 'in_file')  # 7 ### 'mean_file' -> 'in_file'
     preproc.connect(automask, 'out_file', tstat, 'mask_file')
 
     calc = pipe.Node(interface=Calc(letters=['a', 'b']), name='afni3Dcalc')
@@ -235,28 +238,28 @@ def pipeline(args):
     preproc.connect(merge, 'out_file', calc, 'in_file_a')
     preproc.connect(automask, 'out_file', calc, 'in_file_b')
 
-    #8
+    # 8
     fourier = pipe.Node(interface=Fourier(), name='afni3Dfourier')
     fourier.inputs.outputtype = outputType
     fourier.inputs.highpass = 0.011
     fourier.inputs.lowpass = 0.1
-    #fourier.inputs.args = '-retrend' # removed on 9/20/13
+    # fourier.inputs.args = '-retrend' # removed on 9/20/13
     fourier.inputs.outputtype = outputType
 
-    #9
+    # 9
     bFit = pipe.Node(interface=sem.BRAINSFit(), name='brainsFit')
     bFit.inputs.initializeTransformMode = 'useCenterOfHeadAlign'
     bFit.inputs.maskProcessingMode = 'ROIAUTO'
     bFit.inputs.ROIAutoDilateSize = 10.0
     bFit.inputs.useRigid = True
-    bFit.inputs.costMetric = 'MMI' # (default)
-    bFit.inputs.numberOfSamples = 100000 # (default)
+    bFit.inputs.costMetric = 'MMI'  # (default)
+    bFit.inputs.numberOfSamples = 100000  # (default)
     bFit.inputs.outputTransform = True
-    #############################################################################################################################
+    ##########################################################################
     # The registration of the T1 -> fMRI is good _most_ of the time, but sometimes it hits a local minimum during optimization. #
     # To prevent this, we set the fMRI image as the moving image and the T1 as the fixed.  When we run ApplyTransforms, we pass #
     # it the inverse rigid transform file (or give it the 'inverse' flag)                                                       #
-    #############################################################################################################################
+    ##########################################################################
 
     preproc.connect(tstat, 'out_file', bFit, 'movingVolume')
     preproc.connect(grabber, 't1_File', bFit, 'fixedVolume')
@@ -264,10 +267,10 @@ def pipeline(args):
     forwardTransformT1ToFMRI = pipe.Node(Merger(1), name='0_List_forwardTransformT1ToFMRI')
     preproc.connect(bFit, 'outputTransform', forwardTransformT1ToFMRI, 'in1')
 
-    ### preprocessing_part2.sh
+    # preprocessing_part2.sh
     warpT1ToFMRI = pipe.Node(interface=ApplyTransforms(), iterfield=['input_image'],
                              name='antsApplyTransformsT1')
-    warpT1ToFMRI.inputs.interpolation='Linear' # Validation test value: NearestNeighbor
+    warpT1ToFMRI.inputs.interpolation = 'Linear'  # Validation test value: NearestNeighbor
     warpT1ToFMRI.inputs.invert_transform_flags = [True]
     preproc.connect(tstat, 'out_file', warpT1ToFMRI, 'reference_image')
     preproc.connect(grabber, 't1_File', warpT1ToFMRI, 'input_image')
@@ -276,19 +279,18 @@ def pipeline(args):
     preproc.connect(bFit, 'outputTransform', forwardTransform, 'in1')
     preproc.connect(bFit, 'outputTransform', reverseTransform, 'in2')
 
-
-
     warpBABCSegToFMRI = pipe.Node(interface=ApplyTransforms(), iterfield=['input_image'],
-                             name='warpBABCSegToFMRI')
-    warpBABCSegToFMRI.inputs.interpolation='NearestNeighbor'
+                                  name='warpBABCSegToFMRI')
+    warpBABCSegToFMRI.inputs.interpolation = 'NearestNeighbor'
     warpBABCSegToFMRI.inputs.invert_transform_flags = [True]
     preproc.connect(tstat, 'out_file', warpBABCSegToFMRI, 'reference_image')
     preproc.connect(grabber, 'csfFile', warpBABCSegToFMRI, 'input_image')
     preproc.connect(forwardTransformT1ToFMRI, 'out', warpBABCSegToFMRI, 'transforms')
 
-    #10
+    # 10
     csfmask = pipe.Node(interface=Function(function=generateTissueMask,
-                                           input_names=['input_file', 'fileName', 'low', 'high', 'erodeFlag', 'binary', 'largest'],
+                                           input_names=['input_file', 'fileName', 'low',
+                                                        'high', 'erodeFlag', 'binary', 'largest'],
                                            output_names=['output_file']),
                         name='csfMask')
     csfmask.inputs.fileName = 'csfMask.nii'
@@ -301,7 +303,7 @@ def pipeline(args):
 
     warpAtlasCSF = warpT1ToFMRI.clone('antsApplyTransformCSF')
     warpAtlasCSF.inputs.invert_transform_flags = [True, False]
-    preproc.connect(csfmask, 'output_file', warpAtlasCSF, 'input_image')       #10
+    preproc.connect(csfmask, 'output_file', warpAtlasCSF, 'input_image')  # 10
     preproc.connect(forwardTransform, 'out', warpAtlasCSF, 'transforms')
     preproc.connect(tstat, 'out_file', warpAtlasCSF, 'reference_image')
 
@@ -310,28 +312,29 @@ def pipeline(args):
     preproc.connect(tstat, 'out_file', warpWHM, 'reference_image')
     preproc.connect(forwardTransformT1ToFMRI, 'out', warpWHM, 'transforms')
 
-    #11
+    # 11
     wmmask = pipe.Node(interface=Function(function=generateTissueMask,
-                                           input_names=['input_file', 'fileName', 'low', 'high', 'erodeFlag', 'binary', 'largest'],
-                                           output_names=['output_file']),
-                        name='wmMask')
+                                          input_names=['input_file', 'fileName', 'low',
+                                                       'high', 'erodeFlag', 'binary', 'largest'],
+                                          output_names=['output_file']),
+                       name='wmMask')
     wmmask.inputs.fileName = 'whiteMatterMask.nii'
     wmmask.inputs.low = 0.99
     wmmask.inputs.high = 1.0
     wmmask.inputs.erodeFlag = True
     wmmask.inputs.binary = False
     wmmask.inputs.largest = False
-    preproc.connect(warpWHM, 'output_image', wmmask, 'input_file')        #11
+    preproc.connect(warpWHM, 'output_image', wmmask, 'input_file')  # 11
 
     csfAvg = pipe.Node(interface=Maskave(), name='afni3DmaskAve_csf')
-    csfAvg.inputs.outputtype = 'AFNI_1D' #outputType
-    csfAvg.inputs.args = '-median' # TODO
+    csfAvg.inputs.outputtype = 'AFNI_1D'  # outputType
+    csfAvg.inputs.args = '-median'  # TODO
     csfAvg.inputs.quiet = True
     preproc.connect(warpAtlasCSF, 'output_image', csfAvg, 'mask')
 
     wmAvg = pipe.Node(interface=Maskave(), name='afni3DmaskAve_wm')
-    wmAvg.inputs.outputtype = 'AFNI_1D' #outputType
-    wmAvg.inputs.args = '-median' # TODO
+    wmAvg.inputs.outputtype = 'AFNI_1D'  # outputType
+    wmAvg.inputs.args = '-median'  # TODO
     wmAvg.inputs.quiet = True
     preproc.connect(wmmask, 'output_file', wmAvg, 'mask')
 
@@ -341,7 +344,8 @@ def pipeline(args):
     if maskGM:
         #------------------------------ GRAY MATTER MASK ------------------------------
         grabber.inputs.field_template['gryFile'] = probRegex
-        grabber.inputs.template_args['gryFile'] = [['session_id', 'ACCUMULATED_POSTERIORS', 'POSTERIOR_GM_TOTAL.nii.gz']]
+        grabber.inputs.template_args['gryFile'] = [
+            ['session_id', 'ACCUMULATED_POSTERIORS', 'POSTERIOR_GM_TOTAL.nii.gz']]
         # For cerebrum gray matter ONLY:
         # grabber.inputs.template_args['gryFile'] = [['session_id', 'TissueClassify', 'POSTERIOR_SURFGM.nii.gz']]
         warpGRM = warpT1ToFMRI.clone('antsApplyTransformGRM')
@@ -351,7 +355,8 @@ def pipeline(args):
         preproc.connect(forwardTransformT1ToFMRI, 'out', warpGRM, 'transforms')
 
         grmmask = pipe.Node(interface=Function(function=generateTissueMask,
-                                               input_names=['input_file', 'fileName', 'low', 'high', 'erodeFlag', 'binary', 'largest'],
+                                               input_names=['input_file', 'fileName', 'low',
+                                                            'high', 'erodeFlag', 'binary', 'largest'],
                                                output_names=['output_file']),
                             name='grmMask')
         grmmask.inputs.fileName = 'grmMask.nii'
@@ -363,12 +368,12 @@ def pipeline(args):
         preproc.connect(warpGRM, 'output_image', grmmask, 'input_file')
 
         grmAvg = pipe.Node(interface=Maskave(), name='afni3DmaskAve_grm')
-        grmAvg.inputs.outputtype = 'AFNI_1D' #outputType
-        grmAvg.inputs.args = '-median' # TODO
+        grmAvg.inputs.outputtype = 'AFNI_1D'  # outputType
+        grmAvg.inputs.args = '-median'  # TODO
         grmAvg.inputs.quiet = True
         preproc.connect(grmmask, 'output_file', grmAvg, 'mask')
         preproc.connect(calc, 'out_file', grmAvg, 'in_file')
-        #12
+        # 12
         deconvolve = pipe.Node(interface=Deconvolve(fileCount=4, seriesCount=9), name='afni3Ddeconvolve')
         # deconvolve.inputs.outputtype = outputType # 'AFNI'
         deconvolve.inputs.ignoreWarnings = 10
@@ -425,12 +430,12 @@ def pipeline(args):
         preproc.connect(warpWholeMask, 'output_image', wholeBrainMask, 'input_file')
 
         wholeMaskAvg = pipe.Node(interface=Maskave(), name='afni3DmaskAve_whole')
-        wholeMaskAvg.inputs.outputtype = 'AFNI_1D' #outputType
-        wholeMaskAvg.inputs.args = '-median' # TODO
+        wholeMaskAvg.inputs.outputtype = 'AFNI_1D'  # outputType
+        wholeMaskAvg.inputs.args = '-median'  # TODO
         wholeMaskAvg.inputs.quiet = True
         preproc.connect(wholeBrainMask, 'output_file', wholeMaskAvg, 'mask')
         preproc.connect(calc, 'out_file', wholeMaskAvg, 'in_file')
-        #12
+        # 12
         deconvolve = pipe.Node(interface=Deconvolve(fileCount=4, seriesCount=9), name='afni3Ddeconvolve')
         # deconvolve.inputs.outputtype = outputType # 'AFNI'
         deconvolve.inputs.ignoreWarnings = 10
@@ -499,12 +504,12 @@ def pipeline(args):
         preproc.connect(csfAvg, 'out_file', deconvolve, 'stim_file_1')
         preproc.connect(wmAvg, 'out_file', deconvolve, 'stim_file_2')
         preproc.connect(volreg, 'oned_file', deconvolve, 'stim_file_3')
-    #13
+    # 13
     detrend = pipe.Node(interface=Detrend(), name='afni3Ddetrend')
-    detrend.inputs.outputtype = outputType # 'AFNI'
+    detrend.inputs.outputtype = outputType  # 'AFNI'
     detrend.inputs.suffix = '_dt'
-    detrend.inputs.args = '-polort 3' # TODO
-    preproc.connect(deconvolve, 'out_errts', detrend, 'in_file')         #13
+    detrend.inputs.args = '-polort 3'  # TODO
+    preproc.connect(deconvolve, 'out_errts', detrend, 'in_file')  # 13
 
     # Per Dawei, bandpass after running 3dDetrend
     preproc.connect(calc, 'out_file', deconvolve, 'in_file')
@@ -513,7 +518,7 @@ def pipeline(args):
     downsampleAtlas = pipe.Node(interface=Function(function=resampleImage,
                                                    input_names=['inputVolume', 'outputVolume', 'resolution'],
                                                    output_names=['outputVolume']),
-        name="downsampleAtlas")
+                                name="downsampleAtlas")
     downsampleAtlas.inputs.inputVolume = nacAtlasFile
     downsampleAtlas.inputs.outputVolume = downsampledNACfilename
     downsampleAtlas.inputs.resolution = [int(x) for x in nacResampleResolution]
@@ -521,11 +526,12 @@ def pipeline(args):
     fmriToNAC_epi = pipe.Node(interface=ApplyTransforms(), name='fmriToNac_epi')
     fmriToNAC_epi.inputs.interpolation = 'Linear'
     fmriToNAC_epi.inputs.invert_transform_flags = [False, False]
-    preproc.connect(fourier, 'out_file', fmriToNAC_epi, 'input_image') # Fourier is the last NIFTI file format in the AFNI pipeline
+    # Fourier is the last NIFTI file format in the AFNI pipeline
+    preproc.connect(fourier, 'out_file', fmriToNAC_epi, 'input_image')
     preproc.connect(downsampleAtlas, 'outputVolume', fmriToNAC_epi, 'reference_image')
     preproc.connect(reverseTransform, 'out', fmriToNAC_epi, 'transforms')
 
-    ### Create seed points
+    # Create seed points
     labels, seeds = getAtlasPoints('seeds.fcsv')
 
     seedsIdentity = pipe.Node(interface=IdentityInterface(fields=['index']),
@@ -560,7 +566,7 @@ def pipeline(args):
     preproc.connect(spheres, 'out_file', renameMasks, 'in_file')
 
     atlas_DataSink = pipe.Node(interface=DataSink(), name="atlas_DataSink")
-    atlas_DataSink.inputs.base_directory = preproc.base_dir # '/Shared/paulsen/Experiments/20130417_rsfMRI_Results'
+    atlas_DataSink.inputs.base_directory = preproc.base_dir  # '/Shared/paulsen/Experiments/20130417_rsfMRI_Results'
     atlas_DataSink.inputs.container = RESULTS_DIR
     atlas_DataSink.inputs.parameterization = False
     atlas_DataSink.overwrite = REWRITE_DATASINKS
@@ -581,7 +587,7 @@ def pipeline(args):
     preproc.connect(sessions, 'session_id', renameMasks2, 'session')
 
     clipSeedWithVentriclesNode = pipe.Node(interface=Function(function=clipSeedWithVentricles,
-                                           input_names=['unclipped_seed_fn','fmriBABCSeg_fn','desired_out_seed_fn'],
+                                           input_names=['unclipped_seed_fn', 'fmriBABCSeg_fn', 'desired_out_seed_fn'],
                                            output_names=['clipped_seed_fn']),
                                            name='clipSeedWithVentriclesNode')
 
@@ -589,13 +595,23 @@ def pipeline(args):
 
     preproc.connect(nacToFMRI, 'output_image', clipSeedWithVentriclesNode, 'unclipped_seed_fn')
     preproc.connect(warpBABCSegToFMRI, 'output_image', clipSeedWithVentriclesNode, 'fmriBABCSeg_fn')
-
-    preproc.connect( clipSeedWithVentriclesNode, 'clipped_seed_fn', renameMasks2, 'in_file')
+    if not maskWhiteMatterFromSeeds:
+        preproc.connect(clipSeedWithVentriclesNode, 'clipped_seed_fn', renameMasks2, 'in_file')
+    else:
+        clipSeedWithWhiteMatterNode = pipe.Node(interface=Function(function=clipSeedWithWhiteMatter,
+                                                                   input_names=['seed', 'mask', 'outfile'],
+                                                                   output_names=['outfile']),
+                                                name='clipSeedWithWhiteMatterNode')
+        clipSeedWithWhiteMatterNode.inputs.outfile = 'clipped_wm_seed.nii.gz'
+        preproc.connect(warpBABCSegToFMRI, 'output_image', clipSeedWithWhiteMatterNode, 'mask')
+        preproc.connect(clipSeedWithVentriclesNode, 'clipped_seed_fn', clipSeedWithWhiteMatterNode, 'seed')
+        preproc.connect(clipSeedWithWhiteMatterNode, 'outfile', renameMasks2, 'in_file')
 
     # Labels are iterated over, so we need a seperate datasink to avoid overwriting any preprocessing
     # results when the labels are iterated (e.g. To3d output)
     fmri_label_DataSink = pipe.Node(interface=DataSink(), name='fmri_label_DataSink')
-    fmri_label_DataSink.inputs.base_directory = os.path.join(preproc.base_dir, RESULTS_DIR, 'EPI') # '/Shared/paulsen/Experiments/20130417_rsfMRI_Results/EPI'
+    # '/Shared/paulsen/Experiments/20130417_rsfMRI_Results/EPI'
+    fmri_label_DataSink.inputs.base_directory = os.path.join(preproc.base_dir, RESULTS_DIR, 'EPI')
     fmri_label_DataSink.inputs.parameterization = False
     fmri_label_DataSink.overwrite = REWRITE_DATASINKS
     preproc.connect(sessions, 'session_id', fmri_label_DataSink, 'container')
@@ -604,7 +620,7 @@ def pipeline(args):
 
     roiMedian = pipe.Node(interface=Maskave(), name='afni_roiMedian')
     roiMedian.inputs.outputtype = 'AFNI_1D'
-    roiMedian.inputs.args = '-median -mrange 1 1'  ### TODO
+    roiMedian.inputs.args = '-median -mrange 1 1'  # TODO
     roiMedian.inputs.quiet = True
     preproc.connect(nacToFMRI, 'output_image', roiMedian, 'mask')
     preproc.connect(fourier, 'out_file', roiMedian, 'in_file')
@@ -626,7 +642,7 @@ def pipeline(args):
     preproc.connect(regionLogCalc, 'out_file', renameZscore, 'in_file')
     preproc.connect(renameZscore, 'out_file', fmri_label_DataSink, 'zscores')
 
-    ### Move z values back into NAC atlas space
+    # Move z values back into NAC atlas space
     fmriToNAC_label = fmriToNAC_epi.clone(name='fmriToNac_label')
     fmriToNAC_label.inputs.interpolation = 'Linear'
     fmriToNAC_label.inputs.invert_transform_flags = [False, False]
@@ -645,13 +661,13 @@ def pipeline(args):
     # preproc.write_hierarchical_dotfile(dotfilename='dave.dot')
     if os.environ['USER'] == 'dmwelch' and False:
         # Run preprocessing on the local cluster
-        preproc.run(plugin='SGE', plugin_args={'template':os.path.join(os.getcwd(), 'ENV/bin/activate'),
-                                               'qsub_args':'-S /bin/bash -cwd'})
+        preproc.run(plugin='SGE', plugin_args={'template': os.path.join(os.getcwd(), 'ENV/bin/activate'),
+                                               'qsub_args': '-S /bin/bash -cwd'})
     else:
         import multiprocessing
-        ## Setup environment for CPU load balancing of ITK based programs.
+        # Setup environment for CPU load balancing of ITK based programs.
         total_CPUS = multiprocessing.cpu_count()
-        preproc.run(plugin='MultiProc', plugin_args={'n_proc':total_CPUS})
+        preproc.run(plugin='MultiProc', plugin_args={'n_proc': total_CPUS})
 
 if __name__ == '__main__':
     from docopt import docopt
@@ -662,9 +678,9 @@ if __name__ == '__main__':
         value = args.pop(key)
         key = key.lstrip('-')
         args[key.lower()] = value
-    freesurferOutputTypes = {"nifti_gz" : "niigz",
-                             "afni" : "afni",
-                             "nifti" : "nii"}
+    freesurferOutputTypes = {"nifti_gz": "niigz",
+                             "afni": "afni",
+                             "nifti": "nii"}
     args['freesurfer'] = freesurferOutputTypes[args['format']]
     outvalue = pipeline(args)
     sys.exit(outvalue)

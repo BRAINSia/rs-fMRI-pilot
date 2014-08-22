@@ -2,11 +2,13 @@
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
 
+
 def makeList(input):
     """
     Hack to avoid making a MapNode for a list of length == 1
     """
     return [input]
+
 
 def concatTransforms(transform1, transform2):
     """
@@ -14,11 +16,13 @@ def concatTransforms(transform1, transform2):
     """
     return [transform1, transform2]
 
+
 def splitList(in_list):
     t1_out = in_list[0]
     label1_out = in_lits[1]
     label2_out = in_lits[2]
     return t1_out, label1_out, label2_out
+
 
 def readNrrdHeader(fileName):
     """
@@ -37,11 +41,13 @@ def readNrrdHeader(fileName):
         fID.close()
     raise IOError('Nrrd file %s has regex match for slice and volume numbers!' % fileName)
 
+
 def strCreate(time, slices, volumes, repTime, order):
     """
     Create a funcparams string for To3D()
     """
     return "%s %s %s %s %s" % (time, slices, volumes, repTime, order.strip())
+
 
 def dicomRead(infolder):
     """
@@ -57,6 +63,7 @@ def dicomRead(infolder):
     raise Exception('None of the dicom files in %s contain \
                     "Repetition Time" where PyDicom can find it!' % infolder)
 
+
 def generateTissueMask(input_file, fileName, low=0.0, high=1.0, erodeFlag=False, binary=False, largest=False):
     """
     Using posterior tissue probability file, threshold by
@@ -68,10 +75,10 @@ def generateTissueMask(input_file, fileName, low=0.0, high=1.0, erodeFlag=False,
     assert (isinstance(input_file[0], str)), input_file
     image = sitk.ReadImage(input_file)
     out_file = os.path.abspath('final_' + fileName)
-    ## Compute brain mask
+    # Compute brain mask
     inValue = 1
     outValue = 0
-    if binary: # CSF label
+    if binary:  # CSF label
         # csfLabels = [4,23]
         image1 = sitk.BinaryThreshold(image, low, low + 1)
         image2 = sitk.BinaryThreshold(image, high, high + 1)
@@ -84,8 +91,8 @@ def generateTissueMask(input_file, fileName, low=0.0, high=1.0, erodeFlag=False,
             erodedMask = sitk.BinaryErode(binaryMask, radiusMM)
             sitk.WriteImage(erodedMask, os.path.abspath('eroded_' + fileName))
             connected = sitk.ConnectedComponent(erodedMask)
-            sortedComp = sitk.RelabelComponent(connected, 10) # HACK
-            maskOnly = sitk.BinaryThreshold(sortedComp, 1, 2) #JV made 1, 2
+            sortedComp = sitk.RelabelComponent(connected, 10)  # HACK
+            maskOnly = sitk.BinaryThreshold(sortedComp, 1, 2)  # JV made 1, 2
             sitk.WriteImage(binaryMask, os.path.abspath('binary_' + fileName))
             sitk.WriteImage(connected, os.path.abspath('connected_' + fileName))
             sitk.WriteImage(sortedComp, os.path.abspath('sorted_' + fileName))
@@ -102,6 +109,7 @@ def generateTissueMask(input_file, fileName, low=0.0, high=1.0, erodeFlag=False,
             sitk.WriteImage(binaryMask, out_file)
     return out_file
 
+
 def getLabelList(label_file, arg_template):
     import os
     import SimpleITK as sitk
@@ -116,6 +124,7 @@ def getLabelList(label_file, arg_template):
         if labelCode > 0:
             arg_str.append(arg_template.format(labelCode))
     return arg_str, labelList
+
 
 def writeMat(in_file):
     """
@@ -154,15 +163,16 @@ def writeMat(in_file):
         #rows = len(timepoint)
         data = np.array(row_data, dtype='float', ndmin=2)
         labels = np.array(regionsLabel, dtype='int', ndmin=1)
-    corr = np.corrcoef(data, rowvar=0) # Set rowvar > 0 to correlate timepoints, rowvar = 0 for regions
+    corr = np.corrcoef(data, rowvar=0)  # Set rowvar > 0 to correlate timepoints, rowvar = 0 for regions
     temp, _ = os.path.basename(in_file).split('.')
     corrFile = os.path.abspath(temp + '_corr.mat')
     labelFile = os.path.abspath(temp + '_labels.mat')
     rawFile = os.path.abspath(temp + '_raw.mat')
-    savemat(file_name=corrFile, mdict={'data':corr}, appendmat=True, oned_as='row')
-    savemat(file_name=labelFile, mdict={'data':labels}, appendmat=True, oned_as='row')
-    savemat(file_name=rawFile, mdict={'data':data}, appendmat=True, oned_as='row')
+    savemat(file_name=corrFile, mdict={'data': corr}, appendmat=True, oned_as='row')
+    savemat(file_name=labelFile, mdict={'data': labels}, appendmat=True, oned_as='row')
+    savemat(file_name=rawFile, mdict={'data': data}, appendmat=True, oned_as='row')
     return corrFile, labelFile, rawFile
+
 
 def generateMatSubstitution(in_file, session):
     import os.path
@@ -171,6 +181,7 @@ def generateMatSubstitution(in_file, session):
                                                 suffix=oldString.split('roiStat_')[1])
     return [(oldString, replaceString)]
 
+
 def getAtlasPoints(filename):
     """ Assumes file with text header:
 
@@ -178,6 +189,7 @@ def getAtlasPoints(filename):
     from csv import reader, DictReader
 
     class FiducialReader(DictReader):
+
         def __init__(self, fid, commentchar='#', *args, **kwds):
             if issubclass(DictReader, object):
                 super(DictReader, self).__init__(fid, *args, **kwds)
@@ -205,8 +217,8 @@ def getAtlasPoints(filename):
 
         def next(self):
             if self.line_num == 0:
-               # Used only for its side effect.
-               self.fieldnames
+                # Used only for its side effect.
+                self.fieldnames
             row = self.reader.next()
             self.line_num = self.reader.line_num
             # unlike the basic reader, we prefer not to return blanks,
@@ -225,7 +237,6 @@ def getAtlasPoints(filename):
                 for key in self.fieldnames[lr:]:
                     d[key] = self.restval
             return d
-
 
     with open(filename, 'r') as fid:
         fcsvreader = FiducialReader(fid)
@@ -252,7 +263,7 @@ def createSphereExpression(coordinates, radius=5):
     Test: (-)
     """
     coordinates = tuple(coordinates)
-    expression = 'step(%d-' % radius**2
+    expression = 'step(%d-' % radius ** 2
     axes = ('x', 'y', 'z')
     for index in range(len(axes)):
         if axes[index] == 'z':
@@ -294,6 +305,7 @@ def formatFMRI(dicomDirectory):
 
     return modality, numberOfSlices, numberOfFiles, repetitionTime, sliceOrder
 
+
 def resampleImage(inputVolume, outputVolume, resolution=(1.0, 1.0, 1.0)):
     """
     Resample the image using Linear interpolation (and identity transform) to the given resolution and write out the file
@@ -307,7 +319,7 @@ def resampleImage(inputVolume, outputVolume, resolution=(1.0, 1.0, 1.0)):
     old_size = list(image.GetSize())
     old_res = list(image.GetSpacing())
     new_res = list(resolution)
-    new_size = [ int((old_size[i] * old_res[i]) / new_res[i]) for i in range(len(new_res))]
+    new_size = [int((old_size[i] * old_res[i]) / new_res[i]) for i in range(len(new_res))]
 
     resampler = sitk.ResampleImageFilter()
     resampler.SetSize(tuple(new_size))
@@ -328,15 +340,49 @@ def resampleImage(inputVolume, outputVolume, resolution=(1.0, 1.0, 1.0)):
 
 def clipSeedWithVentricles(unclipped_seed_fn, fmriBABCSeg_fn, desired_out_seed_fn):
     """
-    This function takes in a seed image, and a BRAINSABC tissue segmentation image
-    threasholds the CSF component (ie. label=4) and then clips the
+    This function takes in a seed image, and a BRAINSABC tissue segmentation image,
+    threasholds the CSF component (ie. label=4) and then clips the seed mask
     """
     import SimpleITK as sitk
     import os
-    ucs = sitk.ReadImage(unclipped_seed_fn)
-    seg = sitk.ReadImage(fmriBABCSeg_fn)
-    csf_seg = sitk.BinaryThreshold(seg,4,4)
-    cs = ucs * sitk.Cast( (1 - csf_seg ), ucs.GetPixelIDValue() )
-    clipped_seed_fn = os.path.abspath(desired_out_seed_fn)
-    sitk.WriteImage(cs, clipped_seed_fn )
-    return clipped_seed_fn
+    from utilities import clipSeed
+    csfLabel = 4
+    return clipSeed(unclipped_seed_fn, fmriBABCSeg_fn, csfLabel, desired_out_seed_fn, True)
+
+    # ucs = sitk.ReadImage(unclipped_seed_fn)
+    # seg = sitk.ReadImage(fmriBABCSeg_fn)
+    # csf_seg = sitk.BinaryThreshold(seg, csfLabel, csfLabel)
+    # cs = ucs * sitk.Cast((1 - csf_seg), ucs.GetPixelIDValue())
+    # clipped_seed_fn = os.path.abspath(desired_out_seed_fn)
+    # sitk.WriteImage(cs, clipped_seed_fn)
+    # return clipped_seed_fn
+
+def clipSeedWithWhiteMatter(seed, mask, outfile):
+    """
+    This function takes in a seed image and a whiteMatter mask to clip the seed
+    """
+    import SimpleITK as sitk
+    import os
+    from utilities import clipSeed
+    wmLabel = 1
+    return clipSeed(seed, mask, wmLabel, outfile, True)
+
+
+def clipSeed(seed, tissues, label, outfile, invert):
+    """
+    Given two filenames and a label, mask the first file by the second.  Return the filename
+      of the output.  Behavior of masking is controlled by the label and invert inputs
+    """
+    import SimpleITK as sitk
+    import os
+    seedImage = sitk.ReadImage(os.path.abspath(seed))
+    tissueImage = sitk.ReadImage(os.path.abspath(tissues))
+    binaryImage = sitk.BinaryThreshold(tissueImage, label, label)
+    if invert:
+        invertImage = sitk.Cast((1 - binaryImage), seedImage.GetPixelIDValue())
+        clippedImage = seedImage * invertImage
+    else:
+        clippedImage = seedImage * sitk.Cast(binaryImage, seedImage.GetPixelIDValue())
+    outfile = os.path.abspath(outfile)
+    sitk.WriteImage(clippedImage, outfile)
+    return outfile
