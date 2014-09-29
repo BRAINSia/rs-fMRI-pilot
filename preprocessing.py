@@ -574,7 +574,7 @@ def pipeline(args):
     preproc.connect(downsampleAtlas, 'outputVolume', atlas_DataSink, 'Atlas.@resampled')
 
     # Warp seed output to FMRI--this will be the input into the clipping code. JV -- Dec. 17 2013
-    nacToFMRI = pipe.Node(interface=ApplyTransforms(), name="nacToFMRI")
+    nacToFMRI = pipe.Node(interface=ApplyTransforms(), name="warpNACseedsToFMRI")
     nacToFMRI.inputs.interpolation = 'NearestNeighbor'
     nacToFMRI.inputs.invert_transform_flags = [True, False]
     preproc.connect(spheres, 'out_file', nacToFMRI, 'input_image')
@@ -622,13 +622,13 @@ def pipeline(args):
     roiMedian.inputs.outputtype = 'AFNI_1D'
     roiMedian.inputs.args = '-median -mrange 1 1'  # TODO
     roiMedian.inputs.quiet = True
-    preproc.connect(nacToFMRI, 'output_image', roiMedian, 'mask')
+    preproc.connect(renameMasks2, 'out_file', roiMedian, 'mask')
     preproc.connect(fourier, 'out_file', roiMedian, 'in_file')
 
     correlate = pipe.Node(interface=Fim(), name='afni_correlate')
     correlate.inputs.out = 'Correlation'
     preproc.connect(roiMedian, 'out_file', correlate, 'ideal_file')
-    preproc.connect(deconvolve, 'out_errts', correlate, 'in_file')
+    preproc.connect(fourier, 'out_file', correlate, 'in_file')
 
     regionLogCalc = pipe.Node(interface=Calc(letters=['a']), name='afni_regionLogCalc')
     regionLogCalc.inputs.outputtype = outputType
