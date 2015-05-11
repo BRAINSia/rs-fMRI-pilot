@@ -11,16 +11,16 @@ Arguments:
 Optional:
   -h, --help                  show this help message and exit
   -f, --force                 force DataSink rewriting
-  -p                          run preprocessing pipeline
+  -p                          run preprocessing pipeline (not Cleveland)
   -g                          global signal regression by masking gray matter
   -b                          whole brain
   -w                          mask white matter from seeds
   -F FORMAT, --format=FORMAT  output format, values: afni, nifti, nifti_gz [default: nifti]
 
 Example:
-  preprocessing.py -n my_new_experiment 0001 0002 0003
-  preprocessing.py -fgF nifti_gz --name new_experiment_w_gray_mask 00001 00002 00003
-  preprocessing.py -bn my_new_experiment_brain_mask --format afni 0001 0002 0003
+  restingState.py -n my_new_experiment 0001 0002 0003
+  restingState.py -fgF nifti_gz --name new_experiment_w_gray_mask 00001 00002 00003
+  restingState.py -bn my_new_experiment_brain_mask --format afni 0001 0002 0003
 
 """
 # TODO: Modify virtualenv to include formatFMRI.sh
@@ -33,11 +33,15 @@ from nipype.interfaces.ants import ApplyTransforms
 from nipype.interfaces.freesurfer.preprocess import *
 from nipype.interfaces.utility import Function, IdentityInterface, Rename, Select
 from nipype.interfaces.utility import Merge as Merger
-import nipype.pipeline.engine as pipe
+0import nipype.pipeline.engine as pipe
 import numpy
 
 import dataio
+import registrationWorkflow
+import preprocessWorkflow
+import nuisanceWorkflow
 import seedWorkflow
+
 from utilities import *
 
 
@@ -107,19 +111,8 @@ def pipeline(args):
         grabber = dataio.clevelandGrabber(infields, outfields,
                                           base_directory='/Shared/paulsen/Experiments',
                                           experiment=t1_experiment)
+
     preproc.connect(sessions, 'session_id', grabber, 'session_id')
-
-    transformGrabber = dataio.transformGrabber(experiment=t1_experiment)
-    preproc.connect(sessions, 'session_id', transformGrabber, 'session_id')
-
-    # NOTE: antsApplyTransforms takes transforms in REVERSE order!!!
-    # Concatenate transforms: NAC -> T1 -> fMRI
-    forwardTransform = pipe.Node(Merger(2), name='0_List_forwardTransformNACToFMRI')
-    preproc.connect(transformGrabber, 'atlasToSessionTransform', forwardTransform, 'in2')
-
-    # Concatenate transforms: NAC <- T1 <- fMRI
-    reverseTransform = pipe.Node(Merger(2), name='0_List_reverseTransformFMRIToNAC')
-    preproc.connect(transformGrabber, 'sessionToAtlasTransform', reverseTransform, 'in1')
 
     formatFMRINode = pipe.Node(interface=Function(function=formatFMRI,
                                                   input_names=['dicomDirectory'],
@@ -130,17 +123,18 @@ def pipeline(args):
     preproc.connect(grabber, 'fmri_dicom_dir', formatFMRINode, 'dicomDirectory')
 
     to_3D_str = afninodes.to3dstrnode('strCreate')
-    preproc.connect(formatFMRINode, 'numberOfSlices', to_3D_str, 'slices')  # 1
-    preproc.connect(formatFMRINode, 'numberOfFiles', to_3D_str, 'volumes')
-    preproc.connect(formatFMRINode, 'repetitionTime', to_3D_str, 'repTime')
-    preproc.connect(formatFMRINode, 'sliceOrder', to_3D_str, 'order')
-
+    to_3D = afninodes.to3dnode('afniTo3D')
+    preproc.connect([(formatFMRINode, to_3D_str, [('numberOfSlices', 'slices'),
+                                                  ('numberOfFiles', 'volumes'),
+                                                  ('repetitionTime', to_3D_str, 'repTime'),
+                                                  ('sliceOrder', to_3D_str, 'order')
+                                                  ]),
+                     (to_3D_str, to_3D, [('funcparams', 'funcparams')])
+                    ])
     ##############
     # FMRI space #
     ##############
-    to_3D = afninodes.to3dnode('afniTo3D')
     preproc.connect(grabber, 'fmri_dicom_dir', to_3D, 'infolder')
-    preproc.connect(to_3D_str, 'out_string', to_3D, 'funcparams')
 
     # HACK: Remove node from pipeline until Nipype/AFNI file copy issue is resolved
     # renameTo3D = pipe.Node(Rename(format_string='%(session)s_to3D'), name='renameTo3D')
@@ -150,201 +144,7 @@ def pipeline(args):
     # preproc.connect(renameTo3D, 'out_file', fmri_DataSink, '@To3D')
     # END HACK
 
-    # 1a
-    refit = afninodes.refitnode('afni3Drefit')
-    preproc.connect(to_3D, 'out_file', refit, 'in_file')
-    # 2
-    skipCount = 6
-    def strToIntMinusOne(string):
-        return int(string) - 1
-    despike = afninodes.despikenode(outputType, skipCount, 'afni3Ddespike')
-    preproc.connect(refit, 'out_file', despike, 'in_file')
-    preproc.connect(formatFMRINode, ('numberOfFiles', strToIntMinusOne), despike, 'end')
-    # 3
-    volreg = afninodes.volregnode(outputType, 'afni3DvolReg')
-    preproc.connect(despike, 'out_file', volreg, 'in_file')  # 3
-    # 4
-    zpad = afninodes.zeropadnode('afniZeropad')
-    preproc.connect(volreg, 'out_file', zpad, 'in_file')  # 4
-    # 5
-    merge = afninodes.mergenode(outputType, 'afni3Dmerge')
-    preproc.connect(zpad, 'out_file', merge, 'in_files')
-    # 6
-    automask = afninodes.automasknode(outputType, 'afni3Dautomask')
-    preproc.connect(merge, 'out_file', automask, 'in_file')  # 6
-    # 7
-    tstat = afninodes.tstatnode(outputType, 'afni3DtStat')
-    preproc.connect(merge, 'out_file', tstat, 'in_file')  # 7 ### 'mean_file' -> 'in_file'
-    preproc.connect(automask, 'out_file', tstat, 'mask_file')
-    calc = afninodes.multiplynode(outputType, 'afni3Dcalc')
-    preproc.connect(merge, 'out_file', calc, 'in_file_a')
-    preproc.connect(automask, 'out_file', calc, 'in_file_b')
-    # 8
-    fourier = afninodes.fouriernode(outputType, 'afni3Dfourier')
-    # 9
-    bFit = pipe.Node(interface=sem.BRAINSFit(), name='brainsFit')
-    bFit.inputs.initializeTransformMode = 'useCenterOfHeadAlign'
-    bFit.inputs.maskProcessingMode = 'ROIAUTO'
-    bFit.inputs.ROIAutoDilateSize = 10.0
-    bFit.inputs.useRigid = True
-    bFit.inputs.costMetric = 'MMI'  # (default)
-    bFit.inputs.numberOfSamples = 100000  # (default)
-    bFit.inputs.outputTransform = True
-    ##########################################################################
-    # The registration of the T1 -> fMRI is good _most_ of the time, but sometimes it hits a local minimum during optimization. #
-    # To prevent this, we set the fMRI image as the moving image and the T1 as the fixed.  When we run ApplyTransforms, we pass #
-    # it the inverse rigid transform file (or give it the 'inverse' flag)                                                       #
-    ##########################################################################
-
-    preproc.connect(tstat, 'out_file', bFit, 'movingVolume')
-    preproc.connect(grabber, 't1_File', bFit, 'fixedVolume')
-
-    forwardTransformT1ToFMRI = pipe.Node(Merger(1), name='0_List_forwardTransformT1ToFMRI')
-    preproc.connect(bFit, 'outputTransform', forwardTransformT1ToFMRI, 'in1')
-
-    # preprocessing_part2.sh
-    warpT1ToFMRI = pipe.Node(interface=ApplyTransforms(), iterfield=['input_image'],
-                             name='antsApplyTransformsT1')
-    warpT1ToFMRI.inputs.interpolation = 'Linear'  # Validation test value: NearestNeighbor
-    warpT1ToFMRI.inputs.invert_transform_flags = [True]
-    preproc.connect(tstat, 'out_file', warpT1ToFMRI, 'reference_image')
-    preproc.connect(grabber, 't1_File', warpT1ToFMRI, 'input_image')
-    preproc.connect(forwardTransformT1ToFMRI, 'out', warpT1ToFMRI, 'transforms')
-
-    preproc.connect(bFit, 'outputTransform', forwardTransform, 'in1')
-    preproc.connect(bFit, 'outputTransform', reverseTransform, 'in2')
-
-    warpBABCSegToFMRI = pipe.Node(interface=ApplyTransforms(), iterfield=['input_image'],
-                                  name='warpBABCSegToFMRI')
-    warpBABCSegToFMRI.inputs.interpolation = 'NearestNeighbor'
-    warpBABCSegToFMRI.inputs.invert_transform_flags = [True]
-    preproc.connect(tstat, 'out_file', warpBABCSegToFMRI, 'reference_image')
-    preproc.connect(grabber, 'csfFile', warpBABCSegToFMRI, 'input_image')
-    preproc.connect(forwardTransformT1ToFMRI, 'out', warpBABCSegToFMRI, 'transforms')
-
-    # 10
-    csfmask = pipe.Node(interface=Function(function=generateTissueMask,
-                                           input_names=['input_file', 'fileName', 'low',
-                                                        'high', 'erodeFlag', 'binary', 'largest'],
-                                           output_names=['output_file']),
-                        name='csfMask')
-    csfmask.inputs.fileName = 'csfMask.nii'
-    csfmask.inputs.low = 3
-    csfmask.inputs.high = 42
-    csfmask.inputs.erodeFlag = False
-    csfmask.inputs.binary = True
-    csfmask.inputs.largest = False
-    csfmask.inputs.input_file = nacAtlasLabel
-
-    warpAtlasCSF = warpT1ToFMRI.clone('antsApplyTransformCSF')
-    warpAtlasCSF.inputs.invert_transform_flags = [True, False]
-    preproc.connect(csfmask, 'output_file', warpAtlasCSF, 'input_image')  # 10
-    preproc.connect(forwardTransform, 'out', warpAtlasCSF, 'transforms')
-    preproc.connect(tstat, 'out_file', warpAtlasCSF, 'reference_image')
-
-    warpWHM = warpT1ToFMRI.clone('antsApplyTransformWHM')
-    preproc.connect(grabber, 'whmFile', warpWHM, 'input_image')
-    preproc.connect(tstat, 'out_file', warpWHM, 'reference_image')
-    preproc.connect(forwardTransformT1ToFMRI, 'out', warpWHM, 'transforms')
-
-    # 11
-    wmmask = pipe.Node(interface=Function(function=generateTissueMask,
-                                          input_names=['input_file', 'fileName', 'low',
-                                                       'high', 'erodeFlag', 'binary', 'largest'],
-                                          output_names=['output_file']),
-                       name='wmMask')
-    wmmask.inputs.fileName = 'whiteMatterMask.nii'
-    wmmask.inputs.low = 0.99
-    wmmask.inputs.high = 1.0
-    wmmask.inputs.erodeFlag = True
-    wmmask.inputs.binary = False
-    wmmask.inputs.largest = False
-    preproc.connect(warpWHM, 'output_image', wmmask, 'input_file')  # 11
-
-    csfAvg = afninodes.maskavenode('AFNI_1D', 'afni3DmaskAve_csf')
-    preproc.connect(warpAtlasCSF, 'output_image', csfAvg, 'mask')
-    preproc.connect(calc, 'out_file', csfAvg, 'in_file')
-    wmAvg = afninodes.maskavenode('AFNI_1D', 'afni3DmaskAve_wm')
-    preproc.connect(wmmask, 'output_file', wmAvg, 'mask')
-    preproc.connect(calc, 'out_file', wmAvg, 'in_file')
-
-    if maskGM:
-        #------------------------------ GRAY MATTER MASK ------------------------------
-        warpGRM = warpT1ToFMRI.clone('antsApplyTransformGRM')
-        warpGRM.inputs.invert_transform_flags = [True]
-        preproc.connect(grabber, 'gryFile', warpGRM, 'input_image')
-        preproc.connect(tstat, 'out_file', warpGRM, 'reference_image')
-        preproc.connect(forwardTransformT1ToFMRI, 'out', warpGRM, 'transforms')
-
-        grmmask = pipe.Node(interface=Function(function=generateTissueMask,
-                                               input_names=['input_file', 'fileName', 'low',
-                                                            'high', 'erodeFlag', 'binary', 'largest'],
-                                               output_names=['output_file']),
-                            name='grmMask')
-        grmmask.inputs.fileName = 'grmMask.nii'
-        grmmask.inputs.low = 0.99
-        grmmask.inputs.high = 1.0
-        grmmask.inputs.erodeFlag = False
-        grmmask.inputs.binary = False
-        grmmask.inputs.largest = False
-        preproc.connect(warpGRM, 'output_image', grmmask, 'input_file')
-
-        grmAvg = maskavenode('AFNI_1D', 'afni3DmaskAve_grm')
-        preproc.connect(grmmask, 'output_file', grmAvg, 'mask')
-        preproc.connect(calc, 'out_file', grmAvg, 'in_file')
-        # 12
-        deconvolve = afninodes.deconvolvenode(("Median_CSF", "Median_WM", "Median_GM"), "afni3Ddeconvolve")
-        preproc.connect(csfAvg, 'out_file', deconvolve, 'stim_file_1')
-        preproc.connect(wmAvg, 'out_file', deconvolve, 'stim_file_2')
-        preproc.connect(grmAvg, 'out_file', deconvolve, 'stim_file_3')
-        preproc.connect(volreg, 'oned_file', deconvolve, 'stim_file_4')
-
-    elif maskWholeBrain:
-        # Mask the whole brain
-        nacWholeBrainFile = "/Shared/paulsen/Experiments/rsFMRI/rs-fMRI-pilot/ReferenceAtlas/template_brain.nii.gz"
-
-        warpWholeMask = warpT1ToFMRI.clone('antsApplyTransformWholeBrain')
-        warpWholeMask.inputs.invert_transform_flags = [True, False]
-        warpWholeMask.inputs.input_image = nacWholeBrainFile
-        preproc.connect(forwardTransform, 'out', warpWholeMask, 'transforms')
-        preproc.connect(tstat, 'out_file', warpWholeMask, 'reference_image')
-
-        wholeBrainMask = wmmask.clone('wholeBrainMask')
-        wholeBrainMask.inputs.fileName = 'wholeBrainMask.nii'
-        # Invert the mask?
-        wholeBrainMask.inputs.low = 0.5   # 0.0
-        wholeBrainMask.inputs.high = 1.0  # 0.5
-        wholeBrainMask.inputs.erodeFlag = False
-        wholeBrainMask.inputs.binary = False
-        wholeBrainMask.inputs.largest = True
-        preproc.connect(warpWholeMask, 'output_image', wholeBrainMask, 'input_file')
-
-        wholeMaskAvg = pipe.Node(interface=Maskave(), name='afni3DmaskAve_whole')
-        wholeMaskAvg.inputs.outputtype = 'AFNI_1D'  # outputType
-        wholeMaskAvg.inputs.args = '-median'  # TODO
-        wholeMaskAvg.inputs.quiet = True
-        preproc.connect(wholeBrainMask, 'output_file', wholeMaskAvg, 'mask')
-        preproc.connect(calc, 'out_file', wholeMaskAvg, 'in_file')
-        # 12
-        deconvolve = afninodes.deconvolvenode(("Median_CSF", "Median_WM", "Median_WholeBrain"), "afni3Ddeconvolve")
-        preproc.connect(csfAvg, 'out_file', deconvolve, 'stim_file_1')
-        preproc.connect(wmAvg, 'out_file', deconvolve, 'stim_file_2')
-        preproc.connect(wholeMaskAvg, 'out_file', deconvolve, 'stim_file_3')
-        # preproc.connect(wholeBrainMask, 'out_file', deconvolve, 'mask')
-        preproc.connect(volreg, 'oned_file', deconvolve, 'stim_file_4')
-
-    else:
-        deconvolve = afninodes.deconvolvenode(("Median_CSF", "Median_WM"), "afni3Ddeconvolve")
-        preproc.connect(csfAvg, 'out_file', deconvolve, 'stim_file_1')
-        preproc.connect(wmAvg, 'out_file', deconvolve, 'stim_file_2')
-        preproc.connect(volreg, 'oned_file', deconvolve, 'stim_file_3')
-    # 13
-    detrend = afninodes.detrendnode(outputType, 'afni3Ddetrend')
-    preproc.connect(deconvolve, 'out_errts', detrend, 'in_file')  # 13
-    # Per Dawei, bandpass after running 3dDetrend
-    preproc.connect(calc, 'out_file', deconvolve, 'in_file')
-    preproc.connect(detrend, 'out_file', fourier, 'in_file')
-
+    rgwf = registrationWorkflow.workflow(t1_experiment, outputType, name="registration_wkfl")
     downsampleAtlas = pipe.Node(interface=Function(function=resampleImage,
                                                    input_names=['inputVolume', 'outputVolume', 'resolution'],
                                                    output_names=['outputVolume']),
@@ -353,13 +153,51 @@ def pipeline(args):
     downsampleAtlas.inputs.outputVolume = downsampledNACfilename
     downsampleAtlas.inputs.resolution = [int(x) for x in nacResampleResolution]
 
-    fmriToNAC_epi = pipe.Node(interface=ApplyTransforms(), name='fmriToNac_epi')
-    fmriToNAC_epi.inputs.interpolation = 'Linear'
-    fmriToNAC_epi.inputs.invert_transform_flags = [False, False]
-    # Fourier is the last NIFTI file format in the AFNI pipeline
-    preproc.connect(fourier, 'out_file', fmriToNAC_epi, 'input_image')
-    preproc.connect(downsampleAtlas, 'outputVolume', fmriToNAC_epi, 'reference_image')
-    preproc.connect(reverseTransform, 'out', fmriToNAC_epi, 'transforms')
+    preproc.connect(sessions, 'session_id', rgwf, "transformGrabber.session_id")
+    preproc.connect(grabber, 't1_File', rgwf.bFit, 'fixedVolume')
+    preproc.connect(grabber, 't1_File', rgwf.warpT1ToFMRI, 'input_image')
+    preproc.connect(grabber, 'csfFile', rgwf.warpBABCSegToFMRI, 'input_image')
+    preproc.connect(downsampleAtlas, 'outputVolume', rgwf.fmriToNAC_epi, 'reference_image')
+
+    if preprocessOn:
+        preprocessing = preprocessWorkflow.workflow(skipCount=6, name="preprocessing_wkfl", outputType=outputType)
+        nuisance = nuisanceWorkflow.workflow(nacAtlasLabel, outputType, name="nuisance_wkfl")
+
+        preproc.connect([(to_3D, preprocessing, [('out_file', 'refit.in_file')]),     # 1a
+                         (preprocessing, rgwf,  [('merge.out_file', 'tstat.in_file'),  # 7 ### 'mean_file' -> 'in_file'])
+                                                 ('automask.out_file', 'tstat.mask_file')])
+                         (rgwf, rgwf, [('0_List_forwardTransformNACToFMRI.out', 'antsApplyTransformsCSF.transforms'),
+                                       ('afni3DtStat.out_file', 'antsApplyTransformsCSF.reference_image'),
+                                       ('0_List_forwardTransformT1ToFMRI.out', 'antsApplyTransformsWHM.transforms'),
+                                       ('afni3DtStat.out_file', 'antsApplyTransformsWHM.reference_image')]),
+                         (rgwf, nuisance, [('antsApplyTransformWHM.output_image', 'wmMask.input_file'),
+                                           ('antsApplyTransformCSF.output_image', 'afni3DmaskAve_csf.mask')]),
+                         (nuisance, rgwf, [('csfMask.output_file', 'antsApplyTransformsCSF.input_image')]),
+                         (preprocessing, nuisance, [('afni3Dcalc.out_file', 'afni3DmaskAve_wm.in_file'),
+                                                    ('afni3Dcalc.out_file', 'afni3Ddeconvolve.in_file')]),
+                         (grabber, rgwf,  [('whmFile', 'antsApplyTransformWHM.input_image')]),
+                        ])
+
+        if maskGM:
+            preproc.connect([(rgwf, rgwf, [('0_List_forwardTransformT1ToFMRI.out', 'antsApplyTransformsGRM.transforms'),
+                                           ('afni3DtStat.out_file', 'antsApplyTransformsGRM.reference_image')]),
+                             (rgwf, nuisance, [('antsApplyTransformGRM.output_image', 'grmMask.input_file')]),
+                             (preprocessing, nuisance, [('afni3Dcalc.out_file', 'afni3DmaskAve_grm.in_file')])
+                             (grabber, rgwf,  [('gryFile', 'antsApplyTransformGRM.input_image')])
+                            ])
+        elif maskWholeBrain:
+            nacWholeBrainFile = "/Shared/paulsen/Experiments/rsFMRI/rs-fMRI-pilot/ReferenceAtlas/template_brain.nii.gz"
+            node = rgwf.get_node('antsApplyTransformsWholeBrain')
+            node.inputs.input_image = nacWholeBrainFile
+            preproc.connect([(rgwf, rgwf, [('0_List_forwardTransformT1ToFMRI.out', 'antsApplyTransformsWholeBrain.transforms'),
+                                           ('afni3DtStat.out_file', 'antsApplyTransformsWholeBrain.reference_image')]),
+                             (rgwf, nuisance, [('antsApplyTransformGRM.output_image', 'wholeBrainMask.input_file')]),
+                             (preprocessing, nuisance, [('afni3Dcalc.out_file', 'afni3DmaskAve_whole.in_file')])
+                            ])
+        preproc.connect(deconvolve, 'out_errts', detrend, 'in_file')  # 13
+    # Per Dawei, bandpass after running 3dDetrend
+    detrend = afninodes.detrendnode(outputType, 'afni3Ddetrend')
+    preproc.connect(detrend, 'out_file', fourier, 'in_file')
 
     renameMasks = pipe.Node(interface=Rename(format_string='%(label)s_mask'), name='renameMasksAtlas')
     renameMasks.inputs.keep_ext = True
@@ -367,20 +205,17 @@ def pipeline(args):
     atlas_DataSink = dataio.datasink(base_directory=preproc.base_dir, container=RESULTS_DIR,
                                      overwrite=REWRITE_DATASINKS, name="atlas_DataSink")
 
-    # Warp seed output to FMRI--this will be the input into the clipping code. JV -- Dec. 17 2013
-    nacToFMRI = pipe.Node(interface=ApplyTransforms(), name="warpNACseedsToFMRI")
-    nacToFMRI.inputs.interpolation = 'NearestNeighbor'
-    nacToFMRI.inputs.invert_transform_flags = [True, False]
 
     preproc.connect([(renameMasks, atlas_DataSink,     [('out_file', 'Atlas')]),
                      (downsampleAtlas, atlas_DataSink, [('outputVolume', 'Atlas.@resampled')]),
                      (warpT1ToFMRI, nacToFMRI,         [('output_image', 'reference_image')]),
-                     (forwardTransform, nacToFMRI,     [('out', 'transforms')])
                     ])
 
     renameMasks2 = pipe.Node(interface=Rename(format_string='%(session)s_%(label)s_mask'), name='renameMasksFMRI')
     renameMasks2.inputs.keep_ext = True
     preproc.connect(sessions, 'session_id', renameMasks2, 'session')
+
+    seedwkfl = seedWorkflow.workflow()  # TODO
 
     clipSeedWithVentriclesNode = pipe.Node(interface=Function(function=clipSeedWithVentricles,
                                            input_names=['unclipped_seed_fn', 'fmriBABCSeg_fn', 'desired_out_seed_fn'],
@@ -388,8 +223,8 @@ def pipeline(args):
                                            name='clipSeedWithVentriclesNode')
     clipSeedWithVentriclesNode.inputs.desired_out_seed_fn = "clipped_seed.nii.gz"
 
-    preproc.connect(nacToFMRI, 'output_image', clipSeedWithVentriclesNode, 'unclipped_seed_fn')
-    preproc.connect(warpBABCSegToFMRI, 'output_image', clipSeedWithVentriclesNode, 'fmriBABCSeg_fn')
+    preproc.connect(rgwf.nacToFMRI, 'output_image', clipSeedWithVentriclesNode, 'unclipped_seed_fn')
+    preproc.connect(rgwf.warpBABCSegToFMRI, 'output_image', clipSeedWithVentriclesNode, 'fmriBABCSeg_fn')
     if not maskWhiteMatterFromSeeds:
         preproc.connect(clipSeedWithVentriclesNode, 'clipped_seed_fn', renameMasks2, 'in_file')
     else:
@@ -398,7 +233,7 @@ def pipeline(args):
                                                                    output_names=['outfile']),
                                                 name='clipSeedWithWhiteMatterNode')
         clipSeedWithWhiteMatterNode.inputs.outfile = 'clipped_wm_seed.nii.gz'
-        preproc.connect(warpBABCSegToFMRI, 'output_image', clipSeedWithWhiteMatterNode, 'mask')
+        preproc.connect(rgwf.warpBABCSegToFMRI, 'output_image', clipSeedWithWhiteMatterNode, 'mask')
         preproc.connect(clipSeedWithVentriclesNode, 'clipped_seed_fn', clipSeedWithWhiteMatterNode, 'seed')
         preproc.connect(clipSeedWithWhiteMatterNode, 'outfile', renameMasks2, 'in_file')
 
@@ -409,15 +244,15 @@ def pipeline(args):
     # '/Shared/paulsen/Experiments/20130417_rsfMRI_Results/EPI'
     preproc.connect(sessions, 'session_id', fmri_label_DataSink, 'container')
     preproc.connect(renameMasks2, 'out_file', fmri_label_DataSink, 'masks')
-    preproc.connect(fourier, 'out_file', fmri_label_DataSink, 'masks.@bandpass')
+    preproc.connect(rgwf.fourier, 'out_file', fmri_label_DataSink, 'masks.@bandpass')
 
     roiMedian = maskavenode('AFNI_1D', 'afni_roiMedian', '-mrange 1 1')
     preproc.connect(renameMasks2, 'out_file', roiMedian, 'mask')
-    preproc.connect(fourier, 'out_file', roiMedian, 'in_file')
+    preproc.connect(rgwf.fourier, 'out_file', roiMedian, 'in_file')
 
     correlate = afninodes.fimnode('Correlation', 'afni_correlate')
     preproc.connect(roiMedian, 'out_file', correlate, 'ideal_file')
-    preproc.connect(fourier, 'out_file', correlate, 'in_file')
+    preproc.connect(rgwf.fourier, 'out_file', correlate, 'in_file')
 
     regionLogCalc = afninodes.logcalcnode(outputType, 'afni_regionLogCalc')
     preproc.connect(correlate, 'out_file', regionLogCalc, 'in_file_a')
@@ -434,7 +269,7 @@ def pipeline(args):
     fmriToNAC_label.inputs.invert_transform_flags = [False, False]
     preproc.connect(downsampleAtlas, 'outputVolume', fmriToNAC_label, 'reference_image')
     preproc.connect(regionLogCalc, 'out_file', fmriToNAC_label, 'input_image')
-    preproc.connect(reverseTransform, 'out', fmriToNAC_label, 'transforms')
+    preproc.connect(rgwf.reverseTransform, 'out', fmriToNAC_label, 'transforms')
 
     renameZscore2 = pipe.Node(interface=Rename(format_string="%(session)s_%(label)s_result"), name='renameZscore2')
     renameZscore2.inputs.keep_ext = True
@@ -451,13 +286,13 @@ def pipeline(args):
                                                         ('selectLabel.out', 'label')]),
                      (seedSubflow, renameZscore,       [('selectLabel.out', 'label')]),
                      (seedSubflow, renameZscore2,      [('selectLabel.out', 'label')]),
-                     (seedSubflow, nacToFMRI,          [('afni3Dcalc_seeds.out_file', 'input_image')])
+                     (seedSubflow, rgwf.nacToFMRI,     [('afni3Dcalc_seeds.out_file', 'input_image')])
                     ])
 
     preproc.write_graph()
     # preproc.write_hierarchical_dotfile(dotfilename='dave.dot')
     if os.environ['USER'] == 'dmwelch' and False:
-        # Run preprocessing on the local cluster
+        # Run restingState on the local cluster
         preproc.run(plugin='SGE', plugin_args={'template': os.path.join(os.getcwd(), 'ENV/bin/activate'),
                                                'qsub_args': '-S /bin/bash -cwd'})
     else:
