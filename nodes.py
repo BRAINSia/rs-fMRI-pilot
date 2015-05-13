@@ -1,10 +1,12 @@
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
-
+import nipype.pipeline.engine as pipe
 from nipype.interfaces.io import DataSink, DataGrabber
 from nipype.interfaces.utility import Function, IdentityInterface
 from nipype.interfaces.afni.preprocess import *
 from nipype.interfaces.freesurfer.preprocess import *
+from nipype.interfaces.ants import ApplyTransforms
+
 
 def readNrrdHeader(fileName):
     """
@@ -70,6 +72,25 @@ def generateTissueMask(input_file, low=0.0, high=1.0, erodeFlag=False):
     writer.SetFileName(os.path.join(os.getcwd(), 'maskOnly.nii.gz'))
     writer.Execute(maskOnly)
     return writer.GetFileName()
+
+
+def applyTransformNode(name, transform, **kwargs):
+    """ input fields are kwargs e.g. 'interpolation', 'invert_transform_flags', etc. """
+    kwargs.setdefault('interpolation', 'Linear')
+    if transform == 'fmri2nac':
+        kwargs['invert_transform_flags'] = [False, False]
+    elif transform == 't12fmri':
+        kwargs['invert_transform_flags'] = [True]
+    elif transform == 'nac2fmri':
+        kwargs['invert_transform_flags'] = [True, False]
+    else:
+        pass
+    # NOTE: antsApplyTransforms takes transforms in REVERSE order!!!
+    node = pipe.Node(interface=ApplyTransforms(), iterfield=['input_image'], name=name)
+    for k, v in kwargs.items():
+        setattr(node.inputs, k, v)
+    return node
+
 
 def sessionNode(outputType):
     sessionID = args.sessionID

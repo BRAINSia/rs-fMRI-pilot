@@ -1,9 +1,9 @@
 import nipype.pipeline.engine as pipe
-from nipype.interfaces.utility import Merge as Merger
+from nipype.interfaces.utility import Function
 
-import dataio
 import afninodes
 from utilities import generateTissueMask
+from nodes import applyTransformNode
 
 
 def maskNode(name, **inputkwargs):
@@ -24,62 +24,77 @@ def maskNode(name, **inputkwargs):
     return node
 
 
-def workflow(nacAtlasLabel, outputType, name):
+def csfWorkflow(input_file):
+    # Nodes
+    warp = applyTransformNode(name='warpCSFtoFMRI', transform='nac2fmri')
+    mask = maskNode(name='csfMask', fileName='csfMask.nii', low=3, high=42, flags=['binary'], input_file=input_file)
+    avg = afninodes.maskavenode('AFNI_1D', 'afni3DmaskAve_csf')
+    # Pipeline
+    csf = pipe.Workflow(updatehash=True, name='csf')
+    csf.connect([(warp, mask, [('output_image', 'input_file')]),
+                 (mask, avg,  [('output_file', 'mask')]),
+                ])
+    return csf
+
+def wmWorkflow():
+    # Nodes
+    warp = applyTransformNode(name='warpWMtoFMRI', transform='t12fmri')
+    mask = maskNode(name='wmMask', fileName='whiteMatterMask.nii', low=0.99, high=1.0, flags=['erode'])
+    avg = afninodes.maskavenode('AFNI_1D', 'afni3DmaskAve_wm')
+    # Pipeline
+    wm = pipe.Workflow(updatehash=True, name='wm')
+    wm.connect([(warp, mask, [('output_image', 'input_file')]),
+                (mask, avg,  [('output_file', 'mask')]),
+               ])
+    return wm
+
+def gmWorkflow():
+    # Nodes
+    warp = applyTransformNode(name='warpGMtoFMRI', transform='t12fmri')
+    mask = maskNode(name='grmMask', fileName='grmMask.nii', low=0.99, high=1.0)
+    avg = afninodes.maskavenode('AFNI_1D', 'afni3DmaskAve_grm')
+    # Pipeline
+    gm = pipe.Workflow(updatehash=True, name='gm')
+    gm.connect([(warp, mask, [('output_image', 'input_file')]),
+                (mask, avg,  [('output_file', 'mask')]),
+               ])
+    return gm
+
+def wbWorkflow(input_mask):
+    # Nodes
+    warp = applyTransformNode(name='warpBraintoFMRI', transform='nac2fmri')
+    warp.inputs.input_image = input_mask
+    mask = maskNode(name='wholeBrainMask', fileName='wholeBrainMask.nii', low=0.5, high=1.0, flags=['largest'])
+    avg = afninodes.maskavenode('AFNI_1D', name='afni3DmaskAve_whole')
+    # Pipeline
+    wb = pipe.Workflow(updatehash=True, name='wb')
+    wb.connect([(warp, mask, [('output_image', 'input_file')]),
+                (mask, avg,  [('output_file', 'mask')]),
+               ])
+    return wb
+
+def workflow(outputType, name="nuisance", **kwargs):
+    # Nodes
+    # in_fields = ["oned_file", "nactoFMRI", "t1toFMRI", "avg_file"]
+    # inputnode = pipe.Node(interface=IdentityInterface(fields=in_fields), name="inputs")
+    csf_sub = csfWorkflow(kwargs['csf_input'])
+    wm_sub = wmWorkflow()
 
     preproc = pipe.Workflow(updatehash=True, name=name)
+    # preproc.connect([(inputnode, csf_sub, [('avg_file', 'afni3DmaskAve_csf.in_file')
 
-    csfmask = maskNode(name='csfMask', fileName='csfMask.nii', low=3, high=42, flags=['binary'], input_file=nacAtlasLabel)
-    csfAvg = afninodes.maskavenode('AFNI_1D', 'afni3DmaskAve_csf')
-
-    wmmask = maskNode(name='wmMask', fileName='whiteMatterMask.nii', low=0.99, high=1.0, flags=['erode'])
-    wmAvg = afninodes.maskavenode('AFNI_1D', 'afni3DmaskAve_wm')
-    preproc.connect(wmmask, 'out_file', wmAvg, 'mask')
-
-    if maskGM:
-        #------------------------------ GRAY MATTER MASK ------------------------------
-        grmmask = maskNode(name='grmMask', fileName='grmMask.nii', low=0.99, high=1.0)
-                           largest=False)
-
-        grmAvg = maskavenode('AFNI_1D', 'afni3DmaskAve_grm')
-        preproc.connect(grmmask, 'output_file', grmAvg, 'mask')
-        # 12
+    if kwargs['g']:
+        gm_sub = gmWorkflow()  # Mask gray matter
         deconvolve = afninodes.deconvolvenode(("Median_CSF", "Median_WM", "Median_GM"), "afni3Ddeconvolve")
-        preproc.connect(csfAvg, 'out_file', deconvolve, 'stim_file_1')
-        preproc.connect(wmAvg, 'out_file', deconvolve, 'stim_file_2')
-        preproc.connect(grmAvg, 'out_file', deconvolve, 'stim_file_3')
-        preproc.connect(volreg, 'oned_file', deconvolve, 'stim_file_4')
-
-    elif maskWholeBrain:
-        # Mask the whole brain
-        nacWholeBrainFile = "/Shared/paulsen/Experiments/rsFMRI/rs-fMRI-pilot/ReferenceAtlas/template_brain.nii.gz"
-
-        warpWholeMask = rgwf.warpT1ToFMRI.clone('antsApplyTransformWholeBrain')
-        warpWholeMask.inputs.invert_transform_flags = [True, False]
-        warpWholeMask.inputs.input_image = nacWholeBrainFile
-        preproc.connect(rgwf.forwardTransform, 'out', warpWholeMask, 'transforms')
-        preproc.connect(rgwf.tstat, 'out_file', warpWholeMask, 'reference_image')
-
-        wholeBrainMask = maskNode(name='wholeBrainMask', fileName='wholeBrainMask.nii', low=0.5, high=1.0, flags=['largest'])
-        preproc.connect(warpWholeMask, 'output_image', wholeBrainMask, 'input_file')
-
-        wholeMaskAvg = pipe.Node(interface=Maskave(), name='afni3DmaskAve_whole')
-        wholeMaskAvg.inputs.outputtype = 'AFNI_1D'  # outputType
-        wholeMaskAvg.inputs.args = '-median'  # TODO
-        wholeMaskAvg.inputs.quiet = True
-        preproc.connect(wholeBrainMask, 'output_file', wholeMaskAvg, 'mask')
-        preproc.connect(calc, 'out_file', wholeMaskAvg, 'in_file')
-        # 12
+        preproc.connect(gm_sub, 'afni3DmaskAve_grm.out_file', deconvolve, 'stim_file_3')
+    elif kwargs['b']:
+        wb_sub = wbWorkflow(kwargs['wb_input'])  # Mask the whole brain
         deconvolve = afninodes.deconvolvenode(("Median_CSF", "Median_WM", "Median_WholeBrain"), "afni3Ddeconvolve")
-        preproc.connect(csfAvg, 'out_file', deconvolve, 'stim_file_1')
-        preproc.connect(wmAvg, 'out_file', deconvolve, 'stim_file_2')
-        preproc.connect(wholeMaskAvg, 'out_file', deconvolve, 'stim_file_3')
-        # preproc.connect(wholeBrainMask, 'out_file', deconvolve, 'mask')
-        preproc.connect(volreg, 'oned_file', deconvolve, 'stim_file_4')
-
+        preproc.connect(wb_sub, 'afni3DmaskAve_whole.out_file', deconvolve, 'stim_file_3')
     else:
         deconvolve = afninodes.deconvolvenode(("Median_CSF", "Median_WM"), "afni3Ddeconvolve")
-        preproc.connect(csfAvg, 'out_file', deconvolve, 'stim_file_1')
-        preproc.connect(wmAvg, 'out_file', deconvolve, 'stim_file_2')
-        preproc.connect(volreg, 'oned_file', deconvolve, 'stim_file_3')
+    preproc.connect(csf_sub, 'afni3DmaskAve_csf.out_file', deconvolve, 'stim_file_1')
+    preproc.connect(wm_sub, 'afni3DmaskAve_wm.out_file', deconvolve, 'stim_file_2')
 
+    preproc.write_graph(dotfilename='nuisance.dot', graph2use='orig', format='png', simple_form=False)
     return preproc

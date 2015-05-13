@@ -1,13 +1,18 @@
 import nipype.pipeline.engine as pipe
-from nipype.interfaces.utility import Merge as Merger
+from nipype.interfaces.utility import Merge
+from nipype.interfaces.ants.registration import Registration
+from nipype.interfaces.ants import ApplyTransforms
+
+import SEMTools as sem
 
 import dataio
 import afninodes
+from nodes import applyTransformNode
 
 
 def transformNode(name):
     """ BRAINSFit node """
-    bFit = pipe.Node(interface=sem.BRAINSFit(), name='brainsFit')
+    bFit = pipe.Node(interface=sem.BRAINSFit(), name=name)
     bFit.inputs.initializeTransformMode = 'useCenterOfHeadAlign'
     bFit.inputs.maskProcessingMode = 'ROIAUTO'
     bFit.inputs.ROIAutoDilateSize = 10.0
@@ -20,14 +25,6 @@ def transformNode(name):
 
 def mergeNode(count, name):
     pass
-
-
-def applyTransformsNode(name, **kwargs):
-    """ input fields are kwargs e.g. 'interpolation', invert_transform_flags', etc. """
-    node = pipe.Node(interface=ApplyTransforms(), iterfield=['input_image'], name=name)
-    for k, v in kwargs:
-        setattr(node.inputs, k, v)
-    return node
 
 
 def workflow(t1_experiment, outputType, name):
@@ -52,65 +49,51 @@ def workflow(t1_experiment, outputType, name):
     # file (or give it the 'inverse' flag)                                   #
     ##########################################################################
     """
-
     register = pipe.Workflow(updatehash=True, name=name)
 
-    transformGrabber = dataio.transformGrabber(experiment=t1_experiment)
-    # Concatenate transforms
-    # NOTE: antsApplyTransforms takes transforms in REVERSE order!!!
-    forwardTransform = pipe.Node(Merger(2), name='0_List_forwardTransformNACToFMRI')  # NAC -> T1 -> fMRI
-    forwardTransformT1ToFMRI = pipe.Node(Merger(1), name='0_List_forwardTransformT1ToFMRI')  # T1 -> fMRI
-    reverseTransform = pipe.Node(Merger(2), name='0_List_reverseTransformFMRIToNAC')  # NAC <- T1 <- fMRI
-
-    tstat = afninodes.tstatnode(outputType, 'afni3DtStat')
-    fourier = afninodes.fouriernode(outputType, 'afni3Dfourier') # Fourier is the last NIFTI file format in the AFNI pipeline
-
+    # Nodes
     bFit = transformNode(name='brainsFit')
+    tstat = afninodes.tstatnode(outputType, 'tstat')  # fMRI reference image
+    transformGrabber = dataio.transformGrabber(experiment=t1_experiment)
 
-    warpT1ToFMRI = applyTransformNode(name='antsApplyTransformsT1',
-                                      interpolation='Linear',   # Validation test value: NearestNeighbor
-                                      invert_transform_flags=[True])
+    # NAC -> T1 -> fMRI
+    nactoFMRI_list = pipe.Node(Merge(2), name='nactoFMRI_list')
+    warpSeedtoFMRI  = applyTransformNode(name="warpSeedtoFMRI", transform='nac2fmri', interpolation='NearestNeighbor')
+    # T1 -> fMRI
+    t1toFMRI_list = pipe.Node(Merge(1), name='t1toFMRI_list')
+    warpT1toFMRI   = applyTransformNode(name='warpT1toFMRI', transform='t12fmri')  # Validate using 'NearestNeighbor'
+    warpBABCtoFMRI = applyTransformNode(name='warpBABCtoFMRI', transform='t12fmri', interpolation='NearestNeighbor')
+    # fMRI -> T1 -> NAC
+    fmritoNAC_list = pipe.Node(Merge(2), name='fmritoNAC_list')
+    warpEPItoNAC = applyTransformNode(name='warpEPItoNAC', transform='fmri2nac')
+    warpLabeltoNAC  = applyTransformNode(name='warpLabeltoNAC', transform='fmri2nac')
 
-    warpWHM = warpT1ToFMRI.clone('antsApplyTransformWHM')
-    warpGRM = warpT1ToFMRI.clone('antsApplyTransformGRM')  # maskGM
-
-    warpBABCSegToFMRI = applyTransformNode(name='warpBABCSegToFMRI',
-                                           interpolation='NearestNeighbor',
-                                           invert_transform_flags=[True])
-
-    warpAtlasCSF = applyTransformNode(name='antsApplyTransformsCSF',
-                                      interpolation='Linear',
-                                      invert_transform_flags = [True, False])
-
-    warpWholeMask = applyTransformNode(name='antsApplyTransformsWholeBrain',
-                                       interpolation='Linear',
-                                       invert_transform_flags = [True, False])  # maskWholeBrain
-
-    nacToFMRI = applyTransformNode(name="warpNACseedsToFMRI",   # Warp seed output to FMRI
-                                   interpolation='NearestNeighbor',
-                                   invert_transform_flags=[True, False])
-
-    fmriToNAC_epi = applyTransformNode(name='fmriToNac_epi',
-                                       interpolation = 'Linear',
-                                       invert_transform_flags = [False, False])
-
-    register.connect([(tstat, bFit,                                 [('out_file', 'movingVolume')]),
-                      # pass images to the warpers
-                      (tstat, warpT1ToFMRI,                         [('out_file', 'reference_image')]),
-                      (tstat, warpBABCSegToFMRI,                    [('out_file', 'reference_image')]),
-                      (fourier, fmriToNAC_epi,                      [('out_file', 'input_image')]),
-                      # merge the forward transform
-                      (bFit, forwardTransform,                      [('outputTransform', 'in1')]),
-                      (transformGrabber, forwardTransform,          [('atlasToSessionTransform', 'in2')]),
-                      # merge the partial forward transform
-                      (bFit, forwardTransformT1ToFMRI,              [('outputTransform', 'in1')]),
-                      # merge the reverse transform
-                      (transformGrabber, reverseTransform,          [('sessionToAtlasTransform', 'in1')]),
-                      (bFit, reverseTransform,                      [('outputTransform', 'in2')]),
-                      # pass the transforms to the warpers
-                      (forwardTransformT1ToFMRI, warpT1ToFMRI,      [('out', 'transforms')]),
-                      (forwardTransformT1ToFMRI, warpBABCSegToFMRI, [('out', 'transforms')]),
-                      (forwardTransform, nacToFMRI,                 [('out', 'transforms')]),
-                      (reverseTransform, fmriToNAC_epi,             [('out', 'transforms')]),
+    register.connect([(tstat, bFit,                     [('out_file', 'movingVolume')]),
+                      # (dataGrabber, bFit              [('t1_file', 'fixedVolume')]),
+                      # NAC -> T1 -> fMRI
+                      ###################
+                      (bFit,             nactoFMRI_list, [('outputTransform', 'in1')]),
+                      (transformGrabber, nactoFMRI_list, [('atlasToSessionTransform', 'in2')]),
+                      # seeds
+                      (warpT1toFMRI,   warpSeedtoFMRI,   [('output_image', 'reference_image')]),
+                      (nactoFMRI_list, warpSeedtoFMRI,   [('out', 'transforms')]),
+                      # T1 => fMRI
+                      ############
+                      (bFit, t1toFMRI_list,              [('outputTransform', 'in1')]),
+                      # T1
+                      (tstat,         warpT1toFMRI,      [('out_file', 'reference_image')]),
+                      (t1toFMRI_list, warpT1toFMRI,      [('out', 'transforms')]),
+                      # BABC labels
+                      (tstat,         warpBABCtoFMRI,    [('out_file', 'reference_image')]),
+                      (t1toFMRI_list, warpBABCtoFMRI,    [('out', 'transforms')]),
+                      # fMRI => NAC
+                      #############
+                      (transformGrabber, fmritoNAC_list, [('sessionToAtlasTransform', 'in1')]),
+                      (bFit,             fmritoNAC_list, [('outputTransform', 'in2')]),
+                      # session-specific seeds
+                      (fmritoNAC_list, warpEPItoNAC,     [('out', 'transforms')]),
+                      (fmritoNAC_list, warpLabeltoNAC,   [('out', 'transforms')]),
                       ])
+
+    register.write_graph(dotfilename='register.dot', graph2use='orig', format='png', simple_form=False)
     return register

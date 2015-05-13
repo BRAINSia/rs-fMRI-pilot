@@ -130,4 +130,5 @@ def workflow(outputType, name):
                       (seedsIdentity, selectLabel, [('index', 'index')]),
                       (selectSeed, points, [('out', 'coordinates')]),
                       (points, spheres, [('expression', 'expr')])])
+    wkflnode.write_graph(dotfilename='seedWorkflow.dot', graph2use='orig', format='png', simple_form=False)
     return wkflnode
