@@ -28,11 +28,12 @@ pip-log.txt
 .mr.developer.cfg
 
 #Nipype
-*.dot*
+*.dot
+*.png
 crash-*
 
 #rs-fMRI
-*workflow*/
+workflow*/
 *.n*
 logs/
 *\#*
