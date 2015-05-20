@@ -23,22 +23,26 @@ Example:
   restingState.py -bn my_new_experiment_brain_mask --format afni 0001 0002 0003
 
 """
+# from nipype import config, logging
+# config.enable_debug_mode()
+
 # TODO: Modify virtualenv to include formatFMRI.sh
 import os
 import sys
 
 from nipype.interfaces.freesurfer.preprocess import *
 from nipype.interfaces.utility import Function, IdentityInterface, Rename, Select
+from nipype.interfaces.afni.preprocess import Copy
 import nipype.pipeline.engine as pipe
 import numpy
 
 import afninodes
 import dataio
+from utilities import *
 import registrationWorkflow
 import preprocessWorkflow
+import nuisanceWorkflow
 import seedWorkflow
-
-from utilities import *
 
 
 def pipeline(args):
@@ -90,99 +94,89 @@ def pipeline(args):
     # preproc.connect(sessions, 'session_id', fmri_DataSink, 'container')
     # END HACK
     rgwf = registrationWorkflow.workflow(t1_experiment, outputType, name="registration_wkfl")
-    preproc.connect([(sessions,        rgwf, [('session_id', "transformGrabber.session_id")]),
-                     (downsampleAtlas, rgwf, [('outputVolume', 'warpEPItoNAC.reference_image')]),
+    preproc.connect([(sessions, rgwf, [('session_id', "inputs.session_id")]),
                      ])
-    # define grabber
-    if preprocessOn:
-        site = "*"
-        infields = ['session_id']
-        tissuecls = 'Experiments/{experiment}/{site}/*/%s/TissueClassify/%s.nii.gz'.format(site=site, experiment=t1_experiment)
-        posterior = 'Experiments/{experiment}/{site}/*/%s/ACCUMULATED_POSTERIORS/POSTERIOR_%s_TOTAL.nii.gz'.format(
-            site=site, experiment=t1_experiment)
-        field_template = dict(fmri_dicom_dir='MRx/{site}/*/%s/%s/%s/*'.format(site=site),
-                              csfFile=tissuecls,
-                              whmFile=posterior,
-                              t1_File=tissuecls)
-        template_args = dict(fmri_dicom_dir=[['session_id', 'ANONRAW', 'FMRI_RestingStateConnectivity']],
-                             csfFile=[['session_id', 'fixed_brainlabels_seg']],
-                             whmFile=[['session_id', 'WM']],
-                             t1_File=[['session_id', 't1_average_BRAINSABC']])
-        if maskGM:
-            field_template['gryFile'] = posterior
-            template_args['gryFile'] = [['session_id', 'GM']]
-            # For cerebrum gray matter ONLY:
-            # field_template['gryFile'] = tissuecls
-            # template_args['gryFile'] = [['session_id', 'POSTERIOR_SURFGM']]
-        elif maskWholeBrain:
-            pass  # No need for grabber, we're using NAC-atlas file
-        grabber = dataio.iowaGrabber(infields, field_template, template_args, base_directory="/Shared/paulsen")
-    else:
-        infields = ['subject_id', 'session_id', 'year', 'day']
-        outfields = ['fmriHdr', 't1_File']
-        grabber = dataio.clevelandGrabber(infields, outfields,
-                                          base_directory='/Shared/paulsen/Experiments',
-                                          experiment=t1_experiment)
-    preproc.connect(sessions, 'session_id', grabber, 'session_id')
-
-    ##############
-    # FMRI space #
-    ##############
-    # HACK: Remove node from pipeline until Nipype/AFNI file copy issue is resolved
-    # renameTo3D = pipe.Node(Rename(format_string='%(session)s_to3D'), name='renameTo3D')
-    # renameTo3D.inputs.keep_ext = True
-    # preproc.connect(to_3D, 'out_file', renameTo3D, 'in_file')
-    # preproc.connect(sessions, 'session_id', renameTo3D, 'session')
-    # preproc.connect(renameTo3D, 'out_file', fmri_DataSink, '@To3D')
-    # END HACK
     detrend = afninodes.detrendnode(outputType, 'afni3Ddetrend')
-    fourier = afninodes.fouriernode(outputType, 'fourier') # Fourier is the last NIFTI file format in the AFNI pipeline
-    preproc.add_nodes([detrend, fourier])  #DEBUG
-    preproc.write_graph(dotfilename='stage1_h.dot', graph2use='hierarchical', format='png', simple_form=False)  #DEBUG
+    # define grabber
+    site = "*"
+    subject = "*"
     if preprocessOn:
-        args.pop('name')
-        preprocessing = preprocessWorkflow.workflow(skipCount=6, outputType=outputType, name="preprocessing_wkfl", **args)
-        preproc.connect([(grabber, preprocessing,  [('fmri_dicom_dir', 'prep.to_3D.infolder'),
-                                                    ('fmri_dicom_dir', 'prep.formatFMRINode.dicomDirectory')]),
-                         (preprocessing, rgwf,     [('prep.merge.out_file', 'tstat.in_file'),  # 7
-                                                    ('prep.automask.out_file', 'tstat.mask_file')]),
-                                                    ])
-        preproc.write_graph(dotfilename='stage2a_h.dot', graph2use='hierarchical', format='png', simple_form=False)  #DEBUG
-        preproc.connect([(rgwf, preprocessing,     [('tstat.out_file', 'nuisance.csf.warpCSFtoFMRI.reference_image'),  # CSF
-                                                    ('nactoFMRI_list.out', 'nuisance.csf.warpCSFtoFMRI.transforms'),
-                                                    ('tstat.out_file', 'nuisance.wm.warpWMtoFMRI.reference_image'),    # WM
-                                                    ('t1toFMRI_list.out', 'nuisance.wm.warpWMtoFMRI.transforms'),
-                                                    # ('tstat.out_file', 'nuisance.t1.warpCSFtoFMRI.reference_image'),  # T1
-                                                    # ('t1toFMRI_list.out', 'nuisance.t1.warpCSFtoFMRI.transforms'),
-                                                    # ('tstat.out_file', 'nuisance.babc.warpCSFtoFMRI.reference_image'),  # Labels
-                                                    # ('t1toFMRI_list.out', 'nuisance.babc.warpCSFtoFMRI.transforms')
-                                                    ]),
+        grabber = dataio.iowaGrabber(t1_experiment, site, subject, maskGM, maskWholeBrain)
+        preproc.connect([(sessions, grabber, [('session_id', 'session_id')]),
+                         (grabber, rgwf,     [('t1_File', 'inputs.t1')])])
 
+        preprocessing = preprocessWorkflow.prepWorkflow(skipCount=6, outputType=outputType)
+        args.pop('name')  # HACK: prevent name conflict with nuisance workflow
+        nuisance = nuisanceWorkflow.workflow(outputType=outputType, **args)
+        preproc.connect([(grabber, preprocessing,  [('fmri_dicom_dir', 'to_3D.infolder'),
+                                                    ('fmri_dicom_dir', 'formatFMRINode.dicomDirectory')]),
+                         (grabber, nuisance,       [('whmFile', 'wm.warpWMtoFMRI.input_image')]),
+                         (preprocessing, rgwf,     [('merge.out_file', 'inputs.fmri'),  # 7
+                                                    ('automask.out_file', 'tstat.mask_file')]),  # *optional*
+                         (rgwf, nuisance,          [('outputs.fmri_reference', 'csf.warpCSFtoFMRI.reference_image'),  # CSF
+                                                    ('outputs.nac2fmri_list', 'csf.warpCSFtoFMRI.transforms'),
+                                                    ('outputs.fmri_reference', 'wm.warpWMtoFMRI.reference_image'),    # WM
+                                                    ('outputs.t12fmri_list', 'wm.warpWMtoFMRI.transforms')]),
                         ])
-        preproc.write_graph(dotfilename='stage2_h.dot', graph2use='hierarchical', format='png', simple_form=False)  #DEBUG
         if maskGM:
-            preproc.connect([(grabber, preprocessing,  [('gryFile', 'nuisance.gm.warpGMtoFMRI.input_image')]), ])
-            preproc.write_graph(dotfilename='stage3a_h.dot', graph2use='hierarchical', format='png', simple_form=False)  #DEBUG
-            preproc.connect([(rgwf,    preprocessing,  [('tstat.out_file', 'nuisance.gm.warpGMtoFMRI.reference_image'),
-                                                   ('t1toFMRI_list.out', 'nuisance.gm.warpGMtoFMRI.transforms')]),
-                            ])
-            preproc.write_graph(dotfilename='stage3b_h.dot', graph2use='hierarchical', format='png', simple_form=False)  #DEBUG
+            preproc.connect([(grabber, nuisance,       [('gryFile', 'gm.warpGMtoFMRI.input_image')]),
+                             (rgwf, nuisance,          [('outputs.fmri_reference', 'gm.warpGMtoFMRI.reference_image'),
+                                                        ('outputs.t12fmri_list', 'gm.warpGMtoFMRI.transforms')]),
+                             (preprocessing, nuisance, [('calc.out_file', 'gm.afni3DmaskAve_grm.in_file'),
+                                                        ('volreg.oned_file', 'afni3Ddeconvolve.stim_file_4')])])
         elif maskWholeBrain:
-            preproc.connect([(rgwf, nuisance, [('tstat.out_file', 'wb.warpCSFtoFMRI.reference_image'),
-                                               ('nactoFMRI_list.out', 'wb.warpCSFtoFMRI.transforms')]),
-                            ])
-            preproc.write_graph(dotfilename='stage3b_h.dot', graph2use='hierarchical', format='png', simple_form=False)  #DEBUG
-        preproc.connect(preprocessing, 'nuisance.afni3Ddeconvolve.out_errts', detrend, 'in_file')  # 13
+            preproc.connect([(rgwf, nuisance,          [('outputs.fmri_reference', 'wb.warpCSFtoFMRI.reference_image'),
+                                                        ('outputs.nac2fmri_list', 'wb.warpCSFtoFMRI.transforms')]),
+                             (preprocessing, nuisance, [('calc.out_file', 'wb.afni3DmaskAve_whole.in_file'),
+                                                        ('volreg.oned_file', 'afni3Ddeconvolve.stim_file_4')])])
+        else:
+            preproc.connect([(preprocessing, nuisance, [('volreg.oned_file', 'afni3Ddeconvolve.stim_file_3')])])
 
-    preproc.connect([(grabber, rgwf,           [('t1_File', 'brainsFit.fixedVolume'),
-                                                ('t1_File', 'warpT1toFMRI.input_image'),
-                                                ('csfFile', 'warpBABCtoFMRI.input_image')]),
-                     (grabber, nuisance,       [('whmFile', 'wm.warpWMtoFMRI.input_image')]),
-                     (detrend, fourier,        [('out_file', 'in_file')]), # Per Dawei, bandpass after running 3dDetrend
-                     (fourier, rgwf,           [('out_file', 'warpEPItoNAC.input_image')]),
+        preproc.connect([(preprocessing, nuisance, [('calc.out_file', 'wm.afni3DmaskAve_wm.in_file'),
+                                                    ('calc.out_file', 'csf.afni3DmaskAve_csf.in_file'),
+                                                    ('calc.out_file', 'afni3Ddeconvolve.in_file')]),
+                         (nuisance, detrend,       [('afni3Ddeconvolve.out_errts', 'in_file')])])  # 13
+    else:
+        cleveland_grabber = dataio.clevelandGrabber()
+        grabber = dataio.autoworkupGrabber(t1_experiment, site, subject)
+        # subject = pipe.Node(name='getSubject', interface=Function(function=getSubject,
+        #                                                           input_names=['fstring', 'depth'],
+        #                                                           output_names=['subject_id']))
+        # subject.inputs.depth = -4
+        converter = pipe.Node(interface=Copy(), name='converter')  # Convert ANALYZE to AFNI
+
+        preproc.connect([(sessions, grabber,            [('session_id', 'session_id')]),
+                         # (grabber, subject,             [('t1_File', 'fstring')]),
+                         (grabber, rgwf,                [('t1_File', 'inputs.t1')]),
+                         (sessions, cleveland_grabber,  [('session_id', 'session_id')]),
+                         # (subject, cleveland_grabber,   [('subject_id', 'subject_id')]),
+                         (cleveland_grabber, converter, [('fmriHdr', 'in_file')]),
+                         (converter, rgwf,              [('out_file', 'inputs.fmri')]),
+                         (converter, detrend,           [('out_file', 'in_file')]),  # in fMRI_space
+                        ])
+
+    t1_wf = registrationWorkflow.t1Workflow()
+    babc_wf = registrationWorkflow.babcWorkflow()
+    # epi_wf = registrationWorkflow.epiWorkflow()
+    lb_wf = registrationWorkflow.labelWorkflow()
+    seed_wf = registrationWorkflow.seedWorkflow()
+    fourier = afninodes.fouriernode(outputType, 'fourier') # Fourier is the last NIFTI file format in the AFNI pipeline
+
+    preproc.connect([(detrend, fourier,       [('out_file', 'in_file')]), # Per Dawei, bandpass after running 3dDetrend
+                     (grabber, t1_wf,         [('t1_File', 'warpT1toFMRI.input_image')]),
+                     (rgwf, t1_wf,            [('outputs.fmri_reference', 'warpT1toFMRI.reference_image'),  # T1
+                                               ('outputs.t12fmri_list', 'warpT1toFMRI.transforms')]),
+                     (grabber, babc_wf,       [('csfFile', 'warpBABCtoFMRI.input_image')]),
+                     (rgwf, babc_wf,          [('outputs.fmri_reference', 'warpBABCtoFMRI.reference_image'),  # Labels
+                                               ('outputs.t12fmri_list', 'warpBABCtoFMRI.transforms')]),
+                     # (downsampleAtlas, epi_wf, [('outputVolume', 'warpEPItoNAC.reference_image')]),
+                     # (rgwf, epi_wf,         [('outputs.fmri2nac_list', 'warpEPItoNAC.transforms')]),
+                     # (fourier, epi_wf,      [('out_file', 'warpEPItoNAC.input_image')]),
+                     (downsampleAtlas, lb_wf, [('outputVolume', 'warpLabeltoNAC.reference_image')]),
+                     (rgwf, lb_wf,            [('outputs.fmri2nac_list', 'warpLabeltoNAC.transforms')]),
+                     (t1_wf, seed_wf,         [('warpT1toFMRI.output_image', 'warpSeedtoFMRI.reference_image')]),
+                     (rgwf, seed_wf,          [('outputs.nac2fmri_list', 'warpSeedtoFMRI.transforms')]),
                      ])
-
-    preproc.write_graph(dotfilename='stage3_h.dot', graph2use='hierarchical', format='png', simple_form=False)  #DEBUG
 
     renameMasks = pipe.Node(interface=Rename(format_string='%(label)s_mask'), name='renameMasksAtlas')
     renameMasks.inputs.keep_ext = True
@@ -198,16 +192,14 @@ def pipeline(args):
     renameMasks2.inputs.keep_ext = True
     preproc.connect(sessions, 'session_id', renameMasks2, 'session')
 
-    # TODO: seedwkfl = seedWorkflow.workflow()
-
     clipSeedWithVentriclesNode = pipe.Node(interface=Function(function=clipSeedWithVentricles,
                                            input_names=['unclipped_seed_fn', 'fmriBABCSeg_fn', 'desired_out_seed_fn'],
                                            output_names=['clipped_seed_fn']),
                                            name='clipSeedWithVentriclesNode')
     clipSeedWithVentriclesNode.inputs.desired_out_seed_fn = "clipped_seed.nii.gz"
 
-    preproc.connect(rgwf, 'warpSeedtoFMRI.output_image', clipSeedWithVentriclesNode, 'unclipped_seed_fn')
-    preproc.connect(rgwf, 'warpBABCtoFMRI.output_image', clipSeedWithVentriclesNode, 'fmriBABCSeg_fn')
+    preproc.connect(seed_wf, 'warpSeedtoFMRI.output_image', clipSeedWithVentriclesNode, 'unclipped_seed_fn')
+    preproc.connect(babc_wf, 'warpBABCtoFMRI.output_image', clipSeedWithVentriclesNode, 'fmriBABCSeg_fn')
     if not maskWhiteMatterFromSeeds:
         preproc.connect(clipSeedWithVentriclesNode, 'clipped_seed_fn', renameMasks2, 'in_file')
     else:
@@ -216,10 +208,9 @@ def pipeline(args):
                                                                    output_names=['outfile']),
                                                 name='clipSeedWithWhiteMatterNode')
         clipSeedWithWhiteMatterNode.inputs.outfile = 'clipped_wm_seed.nii.gz'
-        preproc.connect(rgwf, 'warpBABCtoFMRI.output_image', clipSeedWithWhiteMatterNode, 'mask')
+        preproc.connect(babc_wf, 'warpBABCtoFMRI.output_image', clipSeedWithWhiteMatterNode, 'mask')
         preproc.connect(clipSeedWithVentriclesNode, 'clipped_seed_fn', clipSeedWithWhiteMatterNode, 'seed')
         preproc.connect(clipSeedWithWhiteMatterNode, 'outfile', renameMasks2, 'in_file')
-    preproc.write_graph(dotfilename='stage4_h.dot', graph2use='hierarchical', format='png', simple_form=False)  #DEBUG
     # Labels are iterated over, so we need a seperate datasink to avoid overwriting any preprocessing
     # results when the labels are iterated (e.g. To3d output)
     fmri_label_DataSink = dataio.datasink(os.path.join(preproc.base_dir, RESULTS_DIR), container='EPI',
@@ -247,13 +238,13 @@ def pipeline(args):
     preproc.connect(renameZscore, 'out_file', fmri_label_DataSink, 'zscores')
 
     # Move z values back into NAC atlas space
-    preproc.connect(downsampleAtlas, 'outputVolume', rgwf, 'warpLabeltoNAC.reference_image')
-    preproc.connect(regionLogCalc, 'out_file', rgwf, 'warpLabeltoNAC.input_image')
+    # preproc.connect(downsampleAtlas, 'outputVolume', lb_wf, 'warpLabeltoNAC.reference_image')
+    preproc.connect(regionLogCalc, 'out_file', lb_wf, 'warpLabeltoNAC.input_image')
 
     renameZscore2 = pipe.Node(interface=Rename(format_string="%(session)s_%(label)s_result"), name='renameZscore2')
     renameZscore2.inputs.keep_ext = True
     preproc.connect(sessions, 'session_id', renameZscore2, 'session')
-    preproc.connect(rgwf, 'warpLabeltoNAC.output_image', renameZscore2, 'in_file')
+    preproc.connect(lb_wf, 'warpLabeltoNAC.output_image', renameZscore2, 'in_file')
     preproc.connect(renameZscore2, 'out_file', atlas_DataSink, 'Atlas.@zscore')
     # Connect seed subworkflow
     seedSubflow = seedWorkflow.workflow(outputType='NIFTI_GZ', name='seed_wkfl')
@@ -263,22 +254,28 @@ def pipeline(args):
                      (seedSubflow, renameMasks2,       [('selectLabel.out', 'label')]),
                      (seedSubflow, renameZscore,       [('selectLabel.out', 'label')]),
                      (seedSubflow, renameZscore2,      [('selectLabel.out', 'label')]),
-                     (seedSubflow, rgwf,               [('afni3Dcalc_seeds.out_file', 'warpSeedtoFMRI.input_image')])
+                     (seedSubflow, seed_wf,               [('afni3Dcalc_seeds.out_file', 'warpSeedtoFMRI.input_image')])
                     ])
-
-    # preproc.write_graph()
-    # preproc.write_hierarchical_dotfile(dotfilename='dave.dot')
-    if os.environ['USER'] == 'dmwelch' and True:
-        preproc.write_graph(dotfilename='preprocessing.dot', graph2use='hierarchical', format='png', simple_form=False)
-        return 0
+    if True:  # os.environ['USER'] == 'dmwelch':
+        # preproc.write_hierarchical_dotfile(dotfilename='dave.dot')
+        # preproc.write_graph(dotfilename=CACHE_DIR + '.dot', graph2use="orig",  #='hierarchical',
+        #                     format='png', simple_form=False)
+        # preproc.run()
+        # Run restingState on the all threads
+        # import multiprocessing
+        # Setup environment for CPU load balancing of ITK based programs.
+        total_CPUS = 22  # multiprocessing.cpu_count()
+        preproc.run(plugin='MultiProc', plugin_args={'n_proc': total_CPUS})
         # Run restingState on the local cluster
-        preproc.run(plugin='SGE', plugin_args={'template': os.path.join(os.getcwd(), 'ENV/bin/activate'),
-                                               'qsub_args': '-S /bin/bash -cwd'})
+        # preproc.run(plugin='SGE', plugin_args={'template': os.path.join(os.getcwd(), 'ENV/bin/activate'),
+        #                                        'qsub_args': '-S /bin/bash -cwd'})
     else:
+        preproc.write_graph()
         import multiprocessing
         # Setup environment for CPU load balancing of ITK based programs.
         total_CPUS = multiprocessing.cpu_count()
         preproc.run(plugin='MultiProc', plugin_args={'n_proc': total_CPUS})
+    return 0
 
 if __name__ == '__main__':
     from docopt import docopt

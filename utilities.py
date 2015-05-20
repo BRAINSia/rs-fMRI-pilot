@@ -182,6 +182,11 @@ def generateMatSubstitution(in_file, session):
     return [(oldString, replaceString)]
 
 
+def getSubject(fstring, depth=-4):
+    """ get the subject id from a path by returning element depth from split list """
+    import os.path
+    tree = fstring.split(os.path.sep)
+    return tree[depth]
 
 
 def formatFMRI(dicomDirectory):

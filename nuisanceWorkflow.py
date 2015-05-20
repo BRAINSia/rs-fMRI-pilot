@@ -1,5 +1,5 @@
 import nipype.pipeline.engine as pipe
-from nipype.interfaces.utility import Function
+from nipype.interfaces.utility import Function, IdentityInterface
 
 import afninodes
 from utilities import generateTissueMask
