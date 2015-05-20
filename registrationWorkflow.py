@@ -1,5 +1,5 @@
 import nipype.pipeline.engine as pipe
-from nipype.interfaces.utility import Merge
+from nipype.interfaces.utility import Merge, IdentityInterface
 from nipype.interfaces.ants.registration import Registration
 from nipype.interfaces.ants import ApplyTransforms
 
@@ -23,8 +23,39 @@ def transformNode(name):
     return bFit
 
 
-def mergeNode(count, name):
-    pass
+def t1Workflow():
+    wkfl = pipe.Workflow(updatehash=True, name='t1_wf')
+    warp = applyTransformNode(name='warpT1toFMRI', transform='t12fmri')  # Validate using 'NearestNeighbor'
+    wkfl.add_nodes([warp])
+    return wkfl
+
+
+def babcWorkflow():
+    wkfl = pipe.Workflow(updatehash=True, name='babc_wf')
+    warp = applyTransformNode(name='warpBABCtoFMRI', transform='t12fmri', interpolation='NearestNeighbor')
+    wkfl.add_nodes([warp])
+    return wkfl
+
+
+def epiWorkflow():
+    wkfl = pipe.Workflow(updatehash=True, name='epi_wf')
+    warp = applyTransformNode(name='warpEPItoNAC', transform='fmri2nac')
+    wkfl.add_nodes([warp])
+    return wkfl
+
+
+def labelWorkflow():
+    wkfl = pipe.Workflow(updatehash=True, name='lb_wf')
+    warp = applyTransformNode(name='warpLabeltoNAC', transform='fmri2nac')
+    wkfl.add_nodes([warp])
+    return wkfl
+
+
+def seedWorkflow():
+    wkfl = pipe.Workflow(updatehash=True, name='seed_wf')
+    warp = applyTransformNode(name="warpSeedtoFMRI", transform='nac2fmri', interpolation='NearestNeighbor')
+    wkfl.add_nodes([warp])
+    return wkfl
 
 
 def workflow(t1_experiment, outputType, name):
@@ -33,7 +64,7 @@ def workflow(t1_experiment, outputType, name):
     Connections needed:
       (in)
       tstat.in_file,
-      tstat.mask_file,
+      tstat.mask_file, **optional**
       transformGrabber.session_id,
       bFit.fixedVolume
 
@@ -52,48 +83,35 @@ def workflow(t1_experiment, outputType, name):
     register = pipe.Workflow(updatehash=True, name=name)
 
     # Nodes
+    in_fields = ['fmri', 't1', 'session_id']
+    inputnode = pipe.Node(interface=IdentityInterface(fields=in_fields), name='inputs')
     bFit = transformNode(name='brainsFit')
     tstat = afninodes.tstatnode(outputType, 'tstat')  # fMRI reference image
-    transformGrabber = dataio.transformGrabber(experiment=t1_experiment)
-
+    txGrabber = dataio.transformGrabber(experiment=t1_experiment)
     # NAC -> T1 -> fMRI
     nactoFMRI_list = pipe.Node(Merge(2), name='nactoFMRI_list')
-    warpSeedtoFMRI  = applyTransformNode(name="warpSeedtoFMRI", transform='nac2fmri', interpolation='NearestNeighbor')
+    register.connect([(bFit,      nactoFMRI_list, [('outputTransform', 'in1')]),
+                      (txGrabber, nactoFMRI_list, [('atlasToSessionTransform', 'in2')])])
     # T1 -> fMRI
     t1toFMRI_list = pipe.Node(Merge(1), name='t1toFMRI_list')
-    warpT1toFMRI   = applyTransformNode(name='warpT1toFMRI', transform='t12fmri')  # Validate using 'NearestNeighbor'
-    warpBABCtoFMRI = applyTransformNode(name='warpBABCtoFMRI', transform='t12fmri', interpolation='NearestNeighbor')
+    register.connect([(bFit,      t1toFMRI_list,  [('outputTransform', 'in1')])])
     # fMRI -> T1 -> NAC
     fmritoNAC_list = pipe.Node(Merge(2), name='fmritoNAC_list')
-    warpEPItoNAC = applyTransformNode(name='warpEPItoNAC', transform='fmri2nac')
-    warpLabeltoNAC  = applyTransformNode(name='warpLabeltoNAC', transform='fmri2nac')
+    register.connect([(txGrabber, fmritoNAC_list, [('sessionToAtlasTransform', 'in1')]),
+                      (bFit,      fmritoNAC_list, [('outputTransform', 'in2')])])
 
-    register.connect([(tstat, bFit,                     [('out_file', 'movingVolume')]),
-                      # (dataGrabber, bFit              [('t1_file', 'fixedVolume')]),
-                      # NAC -> T1 -> fMRI
-                      ###################
-                      (bFit,             nactoFMRI_list, [('outputTransform', 'in1')]),
-                      (transformGrabber, nactoFMRI_list, [('atlasToSessionTransform', 'in2')]),
-                      # seeds
-                      (warpT1toFMRI,   warpSeedtoFMRI,   [('output_image', 'reference_image')]),
-                      (nactoFMRI_list, warpSeedtoFMRI,   [('out', 'transforms')]),
-                      # T1 => fMRI
-                      ############
-                      (bFit, t1toFMRI_list,              [('outputTransform', 'in1')]),
-                      # T1
-                      (tstat,         warpT1toFMRI,      [('out_file', 'reference_image')]),
-                      (t1toFMRI_list, warpT1toFMRI,      [('out', 'transforms')]),
-                      # BABC labels
-                      (tstat,         warpBABCtoFMRI,    [('out_file', 'reference_image')]),
-                      (t1toFMRI_list, warpBABCtoFMRI,    [('out', 'transforms')]),
-                      # fMRI => NAC
-                      #############
-                      (transformGrabber, fmritoNAC_list, [('sessionToAtlasTransform', 'in1')]),
-                      (bFit,             fmritoNAC_list, [('outputTransform', 'in2')]),
-                      # session-specific seeds
-                      (fmritoNAC_list, warpEPItoNAC,     [('out', 'transforms')]),
-                      (fmritoNAC_list, warpLabeltoNAC,   [('out', 'transforms')]),
+    out_fields = ['fmri_reference', 't1_reference', 'nac2fmri_list', 't12fmri_list', 'fmri2nac_list']
+    outputnode = pipe.Node(interface=IdentityInterface(fields=out_fields), name='outputs')
+
+    register.connect([(inputnode, bFit,           [('t1', 'fixedVolume')]),
+                      (inputnode, tstat,          [('fmri', 'in_file')]),
+                      (inputnode, txGrabber,      [('session_id', 'session_id')]),
+                      (tstat,     bFit,           [('out_file', 'movingVolume')]),
+                      (inputnode, outputnode,     [('t1', 't1_reference')]),
+                      (tstat, outputnode,         [('out_file', 'fmri_reference')]),
+                      (nactoFMRI_list, outputnode,[('out', 'nac2fmri_list')]),
+                      (t1toFMRI_list, outputnode, [('out', 't12fmri_list')]),
+                      (fmritoNAC_list, outputnode,[('out', 'fmri2nac_list')]),
                       ])
-
     register.write_graph(dotfilename='register.dot', graph2use='orig', format='png', simple_form=False)
     return register

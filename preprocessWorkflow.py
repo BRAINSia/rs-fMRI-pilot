@@ -1,5 +1,5 @@
 import nipype.pipeline.engine as pipe
-from nipype.interfaces.utility import Function
+from nipype.interfaces.utility import Function, IdentityInterface
 
 import afninodes
 import utilities
@@ -43,6 +43,7 @@ def prepWorkflow(skipCount, outputType, name="prep"):
     preprocessing = pipe.Workflow(updatehash=True, name=name)
 
     # Nodes
+    # inputnode = pipe.Node(interface=IdentityInterface(fields=in_fields), name='inputs')
     format_out = ['modality', 'numberOfSlices', 'numberOfFiles', 'repetitionTime', 'sliceOrder']
     formatFMRINode = pipe.Node(interface=Function(function=utilities.formatFMRI,
                                                   input_names=['dicomDirectory'],
