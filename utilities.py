@@ -19,8 +19,8 @@ def concatTransforms(transform1, transform2):
 
 def splitList(in_list):
     t1_out = in_list[0]
-    label1_out = in_lits[1]
-    label2_out = in_lits[2]
+    label1_out = in_list[1]
+    label2_out = in_list[2]
     return t1_out, label1_out, label2_out
 
 
