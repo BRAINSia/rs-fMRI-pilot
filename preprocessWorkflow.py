@@ -28,10 +28,10 @@ def workflow(skipCount, outputType, name, **kwargs):
     master.connect([(prep, nuisance, [('calc.out_file', 'wm.afni3DmaskAve_wm.in_file'),
                                       ('calc.out_file', 'csf.afni3DmaskAve_csf.in_file'),
                                       ('calc.out_file', 'afni3Ddeconvolve.in_file')])])
-    if kwargs['g']:
+    if kwargs['maskgm']:
         master.connect([(prep, nuisance, [('calc.out_file', 'gm.afni3DmaskAve_grm.in_file'),
                                           ('volreg.oned_file', 'afni3Ddeconvolve.stim_file_4')])])
-    elif kwargs['b']:
+    elif kwargs['maskwb']:
         master.connect([(prep, nuisance, [('calc.out_file', 'wb.afni3DmaskAve_whole.in_file'),
                                           ('volreg.oned_file', 'afni3Ddeconvolve.stim_file_4')])])
     else:

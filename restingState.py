@@ -2,20 +2,23 @@
 """
 Usage:
   restingState.py [-h | --help]
-  restingState.py [-f | --force] [-p] [-g | -b] [-w] [-F FORMAT | --format=FORMAT] (-n NAME| --name=NAME) SESSION...
+  restingState.py [options] [-g | -b] (-n NAME | --name NAME) SESSION...
 
 Arguments:
-  -n NAME, --name=NAME        experiment name
+  -n NAME, --name NAME        experiment name, format: 'YYYYMMDD_<experiment>'
   SESSION                     one or more session IDs
 
-Optional:
+Options:
   -h, --help                  show this help message and exit
+  -d, --debug                 run in debug mode
   -f, --force                 force DataSink rewriting
-  -p                          run preprocessing pipeline (not Cleveland)
-  -g                          global signal regression by masking gray matter
-  -b                          whole brain
-  -w                          mask white matter from seeds
-  -F FORMAT, --format=FORMAT  output format, values: afni, nifti, nifti_gz [default: nifti]
+  -p, --preprocess            run preprocessing pipeline (not Cleveland)
+  -g, --maskGM                global signal regression by masking gray matter (cannot be combined with -b)
+  -b, --maskWB                whole brain (cannot be combined with -g)
+  -w, --maskSeeds             mask white matter from seeds
+  -F FORMAT, --format FORMAT  output format, values: afni, nifti, nifti_gz [default: nifti]
+
+Note: Logs are written to the $PWD/$USER/logs directory
 
 Example:
   restingState.py -n my_new_experiment 0001 0002 0003
@@ -23,11 +26,11 @@ Example:
   restingState.py -bn my_new_experiment_brain_mask --format afni 0001 0002 0003
 
 """
-# from nipype import config, logging
-# config.enable_debug_mode()
+from nipype import config, logging
 
 # TODO: Modify virtualenv to include formatFMRI.sh
 import os
+import re
 import sys
 
 from nipype.interfaces.freesurfer.preprocess import *
@@ -46,19 +49,23 @@ import seedWorkflow
 
 
 def pipeline(args):
+    if args['debug']:
+        config.enable_debug_mode()
+        logging.update_logging(config)
+
     # CONSTANTS
     sessionID = args['session']
     outputType = args['format'].upper()
     fOutputType = args['freesurfer']
-    preprocessOn = args['p']
-    maskGM = args['g']
-    maskWholeBrain = args['b']
-    maskWhiteMatterFromSeeds = args['w']
+    preprocessOn = args['preprocess']
+    maskGM = args['maskgm']
+    maskWholeBrain = args['maskwb']
+    maskWhiteMatterFromSeeds = args['maskseeds']
     REWRITE_DATASINKS = args['force']  # Toggle REWRITE_DATASINKS per command line flag
     # print args['name']
-    CACHE_DIR = "workflow_" + args['name']  # Cache directory
+    CACHE_DIR = args['name'] + "_Cache"  # Cache directory
     RESULTS_DIR = args['name'] + "_Results"  # Universal datasink directory
-    t1_experiment = "20130729_PREDICT_Results"
+    t1_experiment = "20141001_PREDICTHD_long_Results"  #"20130729_PREDICT_Results"
     nacAtlasFile = "/Shared/paulsen/Experiments/rsFMRI/rs-fMRI-pilot/ReferenceAtlas/template_t1.nii.gz"
     nacWholeBrainFile = "/Shared/paulsen/Experiments/rsFMRI/rs-fMRI-pilot/ReferenceAtlas/template_brain.nii.gz"
     nacAtlasLabel = "/Shared/paulsen/Experiments/rsFMRI/rs-fMRI-pilot/ReferenceAtlas/template_nac_labels.nii.gz"
@@ -68,17 +75,13 @@ def pipeline(args):
     args['csf_input'] = nacAtlasFile
     args['wb_input'] = nacWholeBrainFile
 
-    preproc = pipe.Workflow(updatehash=True, name=CACHE_DIR)
-    preproc.base_dir = os.getcwd()
-
-    # HACK: Remove node from pipeline until Nipype/AFNI file copy issue is resolved
-    # fmri_DataSink = pipe.Node(interface=DataSink(), name="fmri_DataSink")
-    # fmri_DataSink.overwrite = REWRITE_DATASINKS
-    # fmri_DataSink.inputs.base_directory = os.path.join(preproc.base_dir, RESULTS_DIR, 'fmri')
-    # '/Shared/paulsen/Experiments/20130417_rsfMRI_Results'
-    # fmri_DataSink.inputs.substitutions = [('to_3D_out+orig', 'to3D')]
-    # fmri_DataSink.inputs.parameterization = False
-    # END HACK
+    preproc = pipe.Workflow(updatehash=True, name=args['name'])
+    userLogDir = os.path.join(os.getcwd(), os.environ['USER'], 'logs')
+    if not os.path.isdir(userLogDir):
+        os.makedirs(userLogDir, 0777)
+    config.update_config({'logging': {'log_directory':userLogDir}})
+    logging.update_logging(config)
+    preproc.base_dir = os.path.abspath("/Shared/sinapse/CACHE")
 
     sessions = pipe.Node(interface=IdentityInterface(fields=['session_id']), name='sessionIDs')
     sessions.iterables = ('session_id', sessionID)
@@ -91,11 +94,19 @@ def pipeline(args):
     downsampleAtlas.inputs.resolution = [int(x) for x in nacResampleResolution]
 
     # HACK: Remove node from pipeline until Nipype/AFNI file copy issue is resolved
-    # preproc.connect(sessions, 'session_id', fmri_DataSink, 'container')
+    # fmri_DataSink = pipe.Node(interface=DataSink(), name="fmri_DataSink")
+    # fmri_DataSink.overwrite = REWRITE_DATASINKS
+    # Output to: /Shared/paulsen/Experiments/YYYYMMDD_<experiment>_Results/fmri
+    # fmri_DataSink.inputs.base_directory = os.path.join(preproc.base_dir, RESULTS_DIR, 'fmri')
+    # fmri_DataSink.inputs.substitutions = [('to_3D_out+orig', 'to3D')]
+    # fmri_DataSink.inputs.parameterization = False
+    #
+    # preproc.connect([(sessions, fmri_DataSink, [('session_id', 'container')])])
     # END HACK
+
     rgwf = registrationWorkflow.workflow(t1_experiment, outputType, name="registration_wkfl")
-    preproc.connect([(sessions, rgwf, [('session_id', "inputs.session_id")]),
-                     ])
+    preproc.connect([(sessions, rgwf, [('session_id', "inputs.session_id")])])
+
     detrend = afninodes.detrendnode(outputType, 'afni3Ddetrend')
     # define grabber
     site = "*"
@@ -139,17 +150,11 @@ def pipeline(args):
     else:
         cleveland_grabber = dataio.clevelandGrabber()
         grabber = dataio.autoworkupGrabber(t1_experiment, site, subject)
-        # subject = pipe.Node(name='getSubject', interface=Function(function=getSubject,
-        #                                                           input_names=['fstring', 'depth'],
-        #                                                           output_names=['subject_id']))
-        # subject.inputs.depth = -4
         converter = pipe.Node(interface=Copy(), name='converter')  # Convert ANALYZE to AFNI
 
         preproc.connect([(sessions, grabber,            [('session_id', 'session_id')]),
-                         # (grabber, subject,             [('t1_File', 'fstring')]),
                          (grabber, rgwf,                [('t1_File', 'inputs.t1')]),
                          (sessions, cleveland_grabber,  [('session_id', 'session_id')]),
-                         # (subject, cleveland_grabber,   [('subject_id', 'subject_id')]),
                          (cleveland_grabber, converter, [('fmriHdr', 'in_file')]),
                          (converter, rgwf,              [('out_file', 'inputs.fmri')]),
                          (converter, detrend,           [('out_file', 'in_file')]),  # in fMRI_space
@@ -157,6 +162,7 @@ def pipeline(args):
 
     t1_wf = registrationWorkflow.t1Workflow()
     babc_wf = registrationWorkflow.babcWorkflow()
+    # HACK: No EPI
     # epi_wf = registrationWorkflow.epiWorkflow()
     lb_wf = registrationWorkflow.labelWorkflow()
     seed_wf = registrationWorkflow.seedWorkflow()
@@ -169,9 +175,11 @@ def pipeline(args):
                      (grabber, babc_wf,       [('csfFile', 'warpBABCtoFMRI.input_image')]),
                      (rgwf, babc_wf,          [('outputs.fmri_reference', 'warpBABCtoFMRI.reference_image'),  # Labels
                                                ('outputs.t12fmri_list', 'warpBABCtoFMRI.transforms')]),
+                     # HACK: No EPI
                      # (downsampleAtlas, epi_wf, [('outputVolume', 'warpEPItoNAC.reference_image')]),
                      # (rgwf, epi_wf,         [('outputs.fmri2nac_list', 'warpEPItoNAC.transforms')]),
                      # (fourier, epi_wf,      [('out_file', 'warpEPItoNAC.input_image')]),
+                     # END HACK
                      (downsampleAtlas, lb_wf, [('outputVolume', 'warpLabeltoNAC.reference_image')]),
                      (rgwf, lb_wf,            [('outputs.fmri2nac_list', 'warpLabeltoNAC.transforms')]),
                      (t1_wf, seed_wf,         [('warpT1toFMRI.output_image', 'warpSeedtoFMRI.reference_image')]),
@@ -213,9 +221,9 @@ def pipeline(args):
         preproc.connect(clipSeedWithWhiteMatterNode, 'outfile', renameMasks2, 'in_file')
     # Labels are iterated over, so we need a seperate datasink to avoid overwriting any preprocessing
     # results when the labels are iterated (e.g. To3d output)
+    # Write out to: /Shared/sinapse/CACHE/YYYYMMDD_<experiment>_Results/EPI
     fmri_label_DataSink = dataio.datasink(os.path.join(preproc.base_dir, RESULTS_DIR), container='EPI',
                                           name='fmri_label_DataSink', overwrite=REWRITE_DATASINKS)
-    # '/Shared/paulsen/Experiments/20130417_rsfMRI_Results/EPI'
     preproc.connect(sessions, 'session_id', fmri_label_DataSink, 'container')
     preproc.connect(renameMasks2, 'out_file', fmri_label_DataSink, 'masks')
     preproc.connect(fourier,'out_file', fmri_label_DataSink, 'masks.@bandpass')
@@ -256,21 +264,23 @@ def pipeline(args):
                      (seedSubflow, renameZscore2,      [('selectLabel.out', 'label')]),
                      (seedSubflow, seed_wf,               [('afni3Dcalc_seeds.out_file', 'warpSeedtoFMRI.input_image')])
                     ])
-    if True:  # os.environ['USER'] == 'dmwelch':
-        # preproc.write_hierarchical_dotfile(dotfilename='dave.dot')
-        # preproc.write_graph(dotfilename=CACHE_DIR + '.dot', graph2use="orig",  #='hierarchical',
-        #                     format='png', simple_form=False)
+    if args['debug']:
+        preproc.write_hierarchical_dotfile(dotfilename='debug_hier.dot')
+        preproc.write_graph(dotfilename='debug_orig.dot', graph2use="orig",  #='hierarchical',
+                            format='png', simple_form=False)
         # preproc.run()
         # Run restingState on the all threads
-        # import multiprocessing
         # Setup environment for CPU load balancing of ITK based programs.
-        total_CPUS = 22  # multiprocessing.cpu_count()
-        preproc.run(plugin='MultiProc', plugin_args={'n_proc': total_CPUS})
+        # --------
+        # import multiprocessing
+        # total_CPUS = 11  # multiprocessing.cpu_count()
+        # preproc.run(plugin='MultiProc', plugin_args={'n_proc': total_CPUS})
+        # --------
         # Run restingState on the local cluster
         # preproc.run(plugin='SGE', plugin_args={'template': os.path.join(os.getcwd(), 'ENV/bin/activate'),
         #                                        'qsub_args': '-S /bin/bash -cwd'})
     else:
-        preproc.write_graph()
+        preproc.write_graph(dotfilename=args['name'] + '.dot')
         import multiprocessing
         # Setup environment for CPU load balancing of ITK based programs.
         total_CPUS = multiprocessing.cpu_count()
@@ -286,6 +296,9 @@ if __name__ == '__main__':
         value = args.pop(key)
         key = key.lstrip('-')
         args[key.lower()] = value
+        if key == 'name':  # check that experiment naming convention is kept
+            if re.match(r"20[0-9]{6}_", value) is None:
+                raise RuntimeError("Experiment name must begin with 'YYYYMMDD_'")
     freesurferOutputTypes = {"nifti_gz": "niigz",
                              "afni": "afni",
                              "nifti": "nii"}
