@@ -5,42 +5,9 @@ import afninodes
 import utilities
 import nuisanceWorkflow
 
-def workflow(skipCount, outputType, name, **kwargs):
-    """ preprocessing workflow
-
-    Connections needed:
-      (in)
-      formatFMRI.dicomDirectory
-      to_3D.infolder
-
-      (out)
-      merge.out_file
-      automask.out_file
-      calc.out_file
-
-    """
-    # Nodes
-    prep = prepWorkflow(skipCount, outputType, name="prep")
-    nuisance = nuisanceWorkflow.workflow(outputType=outputType, name="nuisance", **kwargs)
-
-    master = pipe.Workflow(updatehash=True, name=name)
-
-    master.connect([(prep, nuisance, [('calc.out_file', 'wm.afni3DmaskAve_wm.in_file'),
-                                      ('calc.out_file', 'csf.afni3DmaskAve_csf.in_file'),
-                                      ('calc.out_file', 'afni3Ddeconvolve.in_file')])])
-    if kwargs['maskgm']:
-        master.connect([(prep, nuisance, [('calc.out_file', 'gm.afni3DmaskAve_grm.in_file'),
-                                          ('volreg.oned_file', 'afni3Ddeconvolve.stim_file_4')])])
-    elif kwargs['maskwb']:
-        master.connect([(prep, nuisance, [('calc.out_file', 'wb.afni3DmaskAve_whole.in_file'),
-                                          ('volreg.oned_file', 'afni3Ddeconvolve.stim_file_4')])])
-    else:
-        master.connect([(prep, nuisance, [('volreg.oned_file', 'afni3Ddeconvolve.stim_file_3')])])
-    return master
-
 
 def prepWorkflow(skipCount, outputType, name="prep"):
-    preprocessing = pipe.Workflow(updatehash=True, name=name)
+    preprocessing = pipe.Workflow(name=name)
 
     # Nodes
     # inputnode = pipe.Node(interface=IdentityInterface(fields=in_fields), name='inputs')
@@ -78,6 +45,38 @@ def prepWorkflow(skipCount, outputType, name="prep"):
                            (merge, calc,               [('out_file', 'in_file_a')]),  # 7
                            (automask, calc,            [('out_file', 'in_file_b')]),  # 8
                            ])
-
-    preprocessing.write_graph(dotfilename='preprocess.dot', graph2use='orig', format='png', simple_form=False)
     return preprocessing
+
+
+def workflow(skipCount, outputType, name, **kwargs):
+    """ preprocessing workflow
+
+    Connections needed:
+      (in)
+      formatFMRI.dicomDirectory
+      to_3D.infolder
+
+      (out)
+      merge.out_file
+      automask.out_file
+      calc.out_file
+
+    """
+    # Nodes
+    prep = prepWorkflow(skipCount, outputType, name="prep")
+    nuisance = nuisanceWorkflow.workflow(outputType=outputType, name="nuisance", **kwargs)
+
+    master = pipe.Workflow(name=name)
+
+    master.connect([(prep, nuisance, [('calc.out_file', 'wm.afni3DmaskAve_wm.in_file'),
+                                      ('calc.out_file', 'csf.afni3DmaskAve_csf.in_file'),
+                                      ('calc.out_file', 'afni3Ddeconvolve.in_file')])])
+    if kwargs['maskgm']:
+        master.connect([(prep, nuisance, [('calc.out_file', 'gm.afni3DmaskAve_grm.in_file'),
+                                          ('volreg.oned_file', 'afni3Ddeconvolve.stim_file_4')])])
+    elif kwargs['maskwb']:
+        master.connect([(prep, nuisance, [('calc.out_file', 'wb.afni3DmaskAve_whole.in_file'),
+                                          ('volreg.oned_file', 'afni3Ddeconvolve.stim_file_4')])])
+    else:
+        master.connect([(prep, nuisance, [('volreg.oned_file', 'afni3Ddeconvolve.stim_file_3')])])
+    return master

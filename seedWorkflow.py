@@ -1,9 +1,9 @@
-from csv import DictReader  # reader
+from csv import DictReader
 
-from nipype.interfaces.utility import Function, IdentityInterface, Select  # Rename
+from nipype.interfaces.utility import Function, IdentityInterface, Select
 import nipype.pipeline.engine as pipe
-from nipype.interfaces.afni.preprocess import *
-from nipype.interfaces.afni.preprocess import Calc
+
+from afni.preprocess import Calc
 
 
 class FiducialReader(DictReader):
@@ -30,7 +30,7 @@ class FiducialReader(DictReader):
         return self._fieldnames
 
     @fieldnames.setter
-    def fieldnames(self, value):
+    def fieldnames(self, values):
         self._fieldnames = values
 
     def next(self):
@@ -78,7 +78,9 @@ def createSphereExpression(coordinates, radius=5):
 
     Return: 'step(25-(x-42)*(x-42)-(y+30)*(y+30)-(z-24)*(z-24))'
 
-    Test: (-)
+    >>> createSphereExpression((-42, 30, 24), radius=5)
+    step(25-(x-42)*(x-42)-(y+30)*(y+30)-(z-24)*(z-24))
+
     """
     coordinates = tuple(coordinates)
     expression = 'step(%d-' % radius ** 2
@@ -105,7 +107,7 @@ def createSphereExpression(coordinates, radius=5):
 
 
 def workflow(outputType, name):
-    wkflnode = pipe.Workflow(updatehash=True, name=name)
+    seedworkflow = pipe.Workflow(name=name)
     labels, seeds = getAtlasPoints('seeds.fcsv')  # Create seed points
 
     seedsIdentity = pipe.Node(interface=IdentityInterface(fields=['index']), name='seedsIdentity')
@@ -126,9 +128,8 @@ def workflow(outputType, name):
     spheres.inputs.outputtype = outputType
     spheres.inputs.args = '-nscale'
 
-    wkflnode.connect([(seedsIdentity, selectSeed, [('index', 'index')]),
+    seedworkflow.connect([(seedsIdentity, selectSeed, [('index', 'index')]),
                       (seedsIdentity, selectLabel, [('index', 'index')]),
                       (selectSeed, points, [('out', 'coordinates')]),
                       (points, spheres, [('expression', 'expr')])])
-    wkflnode.write_graph(dotfilename='seedWorkflow.dot', graph2use='orig', format='png', simple_form=False)
-    return wkflnode
+    return seedworkflow
