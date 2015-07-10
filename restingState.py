@@ -120,7 +120,6 @@ def pipeline(args):
         grabber = dataio.iowaGrabber(t1_experiment, site, subject, maskGM, maskWholeBrain)
         master.connect([(sessions, grabber, [('session_id', 'session_id')]),
                          (grabber, registration,     [('t1_File', 'inputs.t1')])])
-        # master.run()  # Fail early
         # Why isn't preprocessWorkflow.workflow() used instead? It would avoid most of the nuisance connections here...
         preprocessing = preprocessWorkflow.prepWorkflow(skipCount=6, outputType=outputType)
         name = args.pop('name')  # HACK: prevent name conflict with nuisance workflow
@@ -166,7 +165,6 @@ def pipeline(args):
                          (converter, registration,      [('out_file', 'inputs.fmri')]),
                          (converter, detrend,           [('out_file', 'in_file')]),  # in fMRI_space
                         ])
-        # master.run()  # Fail early
 
     t1_wf = registrationWorkflow.t1Workflow()
     babc_wf = registrationWorkflow.babcWorkflow()
@@ -268,7 +266,7 @@ def pipeline(args):
                      (seedSubflow, renameZscore2,      [('selectLabel.out', 'label')]),
                      (seedSubflow, seed_wf,               [('afni3Dcalc_seeds.out_file', 'warpSeedtoFMRI.input_image')])
                     ])
-    imageDir = os.path.join(master.base_dir, master.name, 'images')
+    imageDir = '/tmp/images'  #os.path.join(master.base_dir, master.name, 'images')
     if args['plot']:
         os.makedirs(imageDir)
         registration.write_graph(dotfilename=os.path.join(imageDir, 'register.dot'), graph2use='orig', format='png',
