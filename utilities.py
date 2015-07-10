@@ -194,9 +194,10 @@ def formatFMRI(dicomDirectory):
 
     :param dicomDirectory:
     """
+    import os.path
     import subprocess
 
-    outputs = subprocess.check_output(['formatFMRI.sh', dicomDirectory], stderr=subprocess.STDOUT).split(" ")
+    outputs = subprocess.check_output([os.path.join(__file__, 'scripts', 'formatFMRI.sh'), dicomDirectory], stderr=subprocess.STDOUT).split(" ")
     # outputs = cmd.stdout.read().split(" ")
     # errors = cmd.stderr.read().split(" ")
     sliceOrder = outputs.pop()
