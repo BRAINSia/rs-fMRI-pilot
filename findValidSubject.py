@@ -29,7 +29,8 @@ if __name__ == '__main__':
     print fs
     canidates = mrx.intersection(fs)
     post = findMatches('posterior.txt',
-                       '/Shared/paulsen/Experiments/20120801.SubjectOrganized_Results/FMRI_HD_024/*/*/ACCUMULATED_POSTERIORS', 6)
+                       '/Shared/paulsen/Experiments/20141001_PREDICTHD_long_Results/FMRI_HD_024/*/*/ACCUMULATED_POSTERIORS', 6)
+    # Was '/Shared/paulsen/Experiments/20120801.SubjectOrganized_Results/FMRI_HD_024/*/*/ACCUMULATED_POSTERIORS'
     print "Found all posteriors"
     print post
     usable = canidates.intersection(post)

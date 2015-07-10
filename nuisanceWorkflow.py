@@ -1,9 +1,9 @@
 import nipype.pipeline.engine as pipe
-from nipype.interfaces.utility import Function, IdentityInterface
+from nipype.interfaces.utility import Function  #, IdentityInterface
 
 import afninodes
 from utilities import generateTissueMask
-from nodes import applyTransformNode
+from registrationWorkflow import applyTransformNode
 
 
 def maskNode(name, **inputkwargs):
@@ -30,11 +30,12 @@ def csfWorkflow(input_file):
     mask = maskNode(name='csfMask', fileName='csfMask.nii', low=3, high=42, flags=['binary'], input_file=input_file)
     avg = afninodes.maskavenode('AFNI_1D', 'afni3DmaskAve_csf')
     # Pipeline
-    csf = pipe.Workflow(updatehash=True, name='csf')
+    csf = pipe.Workflow(name='csf')
     csf.connect([(warp, mask, [('output_image', 'input_file')]),
                  (mask, avg,  [('output_file', 'mask')]),
                 ])
     return csf
+
 
 def wmWorkflow():
     # Nodes
@@ -42,11 +43,12 @@ def wmWorkflow():
     mask = maskNode(name='wmMask', fileName='whiteMatterMask.nii', low=0.99, high=1.0, flags=['erode'])
     avg = afninodes.maskavenode('AFNI_1D', 'afni3DmaskAve_wm')
     # Pipeline
-    wm = pipe.Workflow(updatehash=True, name='wm')
+    wm = pipe.Workflow(name='wm')
     wm.connect([(warp, mask, [('output_image', 'input_file')]),
                 (mask, avg,  [('output_file', 'mask')]),
                ])
     return wm
+
 
 def gmWorkflow():
     # Nodes
@@ -54,11 +56,12 @@ def gmWorkflow():
     mask = maskNode(name='grmMask', fileName='grmMask.nii', low=0.99, high=1.0)
     avg = afninodes.maskavenode('AFNI_1D', 'afni3DmaskAve_grm')
     # Pipeline
-    gm = pipe.Workflow(updatehash=True, name='gm')
+    gm = pipe.Workflow(name='gm')
     gm.connect([(warp, mask, [('output_image', 'input_file')]),
                 (mask, avg,  [('output_file', 'mask')]),
                ])
     return gm
+
 
 def wbWorkflow(input_mask):
     # Nodes
@@ -67,11 +70,12 @@ def wbWorkflow(input_mask):
     mask = maskNode(name='wholeBrainMask', fileName='wholeBrainMask.nii', low=0.5, high=1.0, flags=['largest'])
     avg = afninodes.maskavenode('AFNI_1D', name='afni3DmaskAve_whole')
     # Pipeline
-    wb = pipe.Workflow(updatehash=True, name='wb')
+    wb = pipe.Workflow(name='wb')
     wb.connect([(warp, mask, [('output_image', 'input_file')]),
                 (mask, avg,  [('output_file', 'mask')]),
                ])
     return wb
+
 
 def workflow(outputType, name="nuisance", **kwargs):
     # Nodes
@@ -80,21 +84,19 @@ def workflow(outputType, name="nuisance", **kwargs):
     csf_sub = csfWorkflow(kwargs['csf_input'])
     wm_sub = wmWorkflow()
 
-    preproc = pipe.Workflow(updatehash=True, name=name)
-    # preproc.connect([(inputnode, csf_sub, [('avg_file', 'afni3DmaskAve_csf.in_file')
+    nuisance = pipe.Workflow(name=name)
+    # nuisance.connect([(inputnode, csf_sub, [('avg_file', 'afni3DmaskAve_csf.in_file')
 
-    if kwargs['g']:
+    if kwargs['maskgm']:
         gm_sub = gmWorkflow()  # Mask gray matter
         deconvolve = afninodes.deconvolvenode(("Median_CSF", "Median_WM", "Median_GM"), "afni3Ddeconvolve")
-        preproc.connect(gm_sub, 'afni3DmaskAve_grm.out_file', deconvolve, 'stim_file_3')
-    elif kwargs['b']:
+        nuisance.connect(gm_sub, 'afni3DmaskAve_grm.out_file', deconvolve, 'stim_file_3')
+    elif kwargs['maskwb']:
         wb_sub = wbWorkflow(kwargs['wb_input'])  # Mask the whole brain
         deconvolve = afninodes.deconvolvenode(("Median_CSF", "Median_WM", "Median_WholeBrain"), "afni3Ddeconvolve")
-        preproc.connect(wb_sub, 'afni3DmaskAve_whole.out_file', deconvolve, 'stim_file_3')
+        nuisance.connect(wb_sub, 'afni3DmaskAve_whole.out_file', deconvolve, 'stim_file_3')
     else:
         deconvolve = afninodes.deconvolvenode(("Median_CSF", "Median_WM"), "afni3Ddeconvolve")
-    preproc.connect(csf_sub, 'afni3DmaskAve_csf.out_file', deconvolve, 'stim_file_1')
-    preproc.connect(wm_sub, 'afni3DmaskAve_wm.out_file', deconvolve, 'stim_file_2')
-
-    preproc.write_graph(dotfilename='nuisance.dot', graph2use='orig', format='png', simple_form=False)
-    return preproc
+    nuisance.connect(csf_sub, 'afni3DmaskAve_csf.out_file', deconvolve, 'stim_file_1')
+    nuisance.connect(wm_sub, 'afni3DmaskAve_wm.out_file', deconvolve, 'stim_file_2')
+    return nuisance

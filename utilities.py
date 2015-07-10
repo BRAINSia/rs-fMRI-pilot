@@ -240,7 +240,7 @@ def resampleImage(inputVolume, outputVolume, resolution=(1.0, 1.0, 1.0)):
     return outputVolume
 
 
-def clipSeedWithVentricles(unclipped_seed_fn, fmriBABCSeg_fn, desired_out_seed_fn):
+def clipSeedWithVentricles(seed, label, outfile):
     """
     This function takes in a seed image, and a BRAINSABC tissue segmentation image,
     threasholds the CSF component (ie. label=4) and then clips the seed mask
@@ -249,15 +249,8 @@ def clipSeedWithVentricles(unclipped_seed_fn, fmriBABCSeg_fn, desired_out_seed_f
     import os
     from utilities import clipSeed
     csfLabel = 4
-    return clipSeed(unclipped_seed_fn, fmriBABCSeg_fn, csfLabel, desired_out_seed_fn, True)
+    return clipSeed(seed, label, csfLabel, outfile, invert=True)
 
-    # ucs = sitk.ReadImage(unclipped_seed_fn)
-    # seg = sitk.ReadImage(fmriBABCSeg_fn)
-    # csf_seg = sitk.BinaryThreshold(seg, csfLabel, csfLabel)
-    # cs = ucs * sitk.Cast((1 - csf_seg), ucs.GetPixelIDValue())
-    # clipped_seed_fn = os.path.abspath(desired_out_seed_fn)
-    # sitk.WriteImage(cs, clipped_seed_fn)
-    # return clipped_seed_fn
 
 def clipSeedWithWhiteMatter(seed, mask, outfile):
     """
@@ -267,7 +260,7 @@ def clipSeedWithWhiteMatter(seed, mask, outfile):
     import os
     from utilities import clipSeed
     wmLabel = 1
-    return clipSeed(seed, mask, wmLabel, outfile, True)
+    return clipSeed(seed, mask, wmLabel, outfile, invert=True)
 
 
 def clipSeed(seed, tissues, label, outfile, invert):

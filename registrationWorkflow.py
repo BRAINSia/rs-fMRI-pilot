@@ -1,13 +1,12 @@
 import nipype.pipeline.engine as pipe
 from nipype.interfaces.utility import Merge, IdentityInterface
-from nipype.interfaces.ants.registration import Registration
 from nipype.interfaces.ants import ApplyTransforms
+# from nipype.interfaces.ants.registration import Registration
 
 import SEMTools as sem
 
 import dataio
 import afninodes
-from nodes import applyTransformNode
 
 
 def transformNode(name):
@@ -23,36 +22,54 @@ def transformNode(name):
     return bFit
 
 
+def applyTransformNode(name, transform, **kwargs):
+    """ input fields are kwargs e.g. 'interpolation', 'invert_transform_flags', etc. """
+    kwargs.setdefault('interpolation', 'Linear')
+    if transform == 'fmri2nac':
+        kwargs['invert_transform_flags'] = [False, False]
+    elif transform == 't12fmri':
+        kwargs['invert_transform_flags'] = [True]
+    elif transform == 'nac2fmri':
+        kwargs['invert_transform_flags'] = [True, False]
+    else:
+        pass
+    # NOTE: antsApplyTransforms takes transforms in REVERSE order!!!
+    node = pipe.Node(interface=ApplyTransforms(), iterfield=['input_image'], name=name)
+    for k, v in kwargs.items():
+        setattr(node.inputs, k, v)
+    return node
+
+
 def t1Workflow():
-    wkfl = pipe.Workflow(updatehash=True, name='t1_wf')
+    wkfl = pipe.Workflow(name='t1_wf')
     warp = applyTransformNode(name='warpT1toFMRI', transform='t12fmri')  # Validate using 'NearestNeighbor'
     wkfl.add_nodes([warp])
     return wkfl
 
 
 def babcWorkflow():
-    wkfl = pipe.Workflow(updatehash=True, name='babc_wf')
+    wkfl = pipe.Workflow(name='babc_wf')
     warp = applyTransformNode(name='warpBABCtoFMRI', transform='t12fmri', interpolation='NearestNeighbor')
     wkfl.add_nodes([warp])
     return wkfl
 
 
 def epiWorkflow():
-    wkfl = pipe.Workflow(updatehash=True, name='epi_wf')
+    wkfl = pipe.Workflow(name='epi_wf')
     warp = applyTransformNode(name='warpEPItoNAC', transform='fmri2nac')
     wkfl.add_nodes([warp])
     return wkfl
 
 
 def labelWorkflow():
-    wkfl = pipe.Workflow(updatehash=True, name='lb_wf')
+    wkfl = pipe.Workflow(name='lb_wf')
     warp = applyTransformNode(name='warpLabeltoNAC', transform='fmri2nac')
     wkfl.add_nodes([warp])
     return wkfl
 
 
 def seedWorkflow():
-    wkfl = pipe.Workflow(updatehash=True, name='seed_wf')
+    wkfl = pipe.Workflow(name='seed_wf')
     warp = applyTransformNode(name="warpSeedtoFMRI", transform='nac2fmri', interpolation='NearestNeighbor')
     wkfl.add_nodes([warp])
     return wkfl
@@ -80,7 +97,7 @@ def workflow(t1_experiment, outputType, name):
     # file (or give it the 'inverse' flag)                                   #
     ##########################################################################
     """
-    register = pipe.Workflow(updatehash=True, name=name)
+    register = pipe.Workflow(name=name)
 
     # Nodes
     in_fields = ['fmri', 't1', 'session_id']
@@ -113,5 +130,4 @@ def workflow(t1_experiment, outputType, name):
                       (t1toFMRI_list, outputnode, [('out', 't12fmri_list')]),
                       (fmritoNAC_list, outputnode,[('out', 'fmri2nac_list')]),
                       ])
-    register.write_graph(dotfilename='register.dot', graph2use='orig', format='png', simple_form=False)
     return register

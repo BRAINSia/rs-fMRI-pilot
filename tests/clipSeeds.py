@@ -6,7 +6,6 @@ import sys
 import SEMTools as sem
 from nipype.interfaces.ants.registration import Registration
 from nipype.interfaces.ants import ApplyTransforms
-from nipype.interfaces.afni.preprocess import *
 from nipype.interfaces.freesurfer.preprocess import *
 from nipype.interfaces.io import DataSink, DataGrabber
 from nipype.interfaces.utility import Function, IdentityInterface, Rename, Select
@@ -15,6 +14,7 @@ import nipype.pipeline.engine as pipe
 import numpy
 
 from utilities import *
+from afni.preprocess import *
 
 def writeSeedFiles():
     CACHE_DIR = 'seeds_CACHE'
@@ -25,7 +25,7 @@ def writeSeedFiles():
     nacResampleResolution = (2.0, 2.0, 2.0)
     downsampledNACfilename = 'downsampledNACatlas.nii.gz'
 
-    preproc = pipe.Workflow(updatehash=True, name=CACHE_DIR)
+    preproc = pipe.Workflow(name=CACHE_DIR)
     preproc.base_dir = os.getcwd()
 
     labels, seeds = getAtlasPoints('/Shared/paulsen/Experiments/rsFMRI/rs-fMRI-pilot/seeds.fcsv')
@@ -82,7 +82,7 @@ def writeSeedFiles():
 def test_pipeline():
     maskWhiteMatterFromSeeds = True
     CACHE_DIR = 'seed_Test_cache'
-    preproc = pipe.Workflow(updatehash=True, name=CACHE_DIR)
+    preproc = pipe.Workflow(name=CACHE_DIR)
     preproc.base_dir = os.getcwd()
 
     labelFile = "/Shared/paulsen/Experiments/rsFMRI/rs-fMRI-pilot/ReferenceAtlas/template_ABC_labels.nii.gz"
