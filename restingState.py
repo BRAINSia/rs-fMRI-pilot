@@ -29,16 +29,14 @@ Example:
 """
 from nipype import config, logging
 
-# TODO: Modify virtualenv to include formatFMRI.sh
 import os
 import re
 import sys
 
-from nipype.interfaces.freesurfer.preprocess import *
+# from nipype.interfaces.freesurfer.preprocess import *
 from nipype.interfaces.utility import Function, IdentityInterface, Rename
 from afni.preprocess import Copy
 import nipype.pipeline.engine as pipe
-# import numpy
 
 import afninodes
 import dataio
@@ -49,12 +47,12 @@ import nuisanceWorkflow
 import seedWorkflow
 
 
-def makeLogDir():
+def makeSupportDir(name, suffix):
     """
-    Create $PWD/$USER/logs, if it d.n.e. This prevents permission collisions with different users
+    Create /tmp/name.suffix, if it d.n.e. This prevents permission collisions with different users
     running the same pipeline
     """
-    retval = os.path.join(os.getcwd(), os.environ['USER'], 'logs')
+    retval = os.path.join('tmp', name + '.' + suffix)
     if not os.path.isdir(retval):
         os.makedirs(retval, 0777)
     return retval
@@ -63,7 +61,7 @@ def makeLogDir():
 def pipeline(args):
     if args['debug']:
         config.enable_debug_mode()
-    config.update_config({'logging': {'log_directory':makeLogDir()}})
+    config.update_config({'logging': {'log_directory':makeSupportDir(args['name'], "logs")}})
     logging.update_logging(config)
 
     # CONSTANTS
@@ -172,9 +170,9 @@ def pipeline(args):
     # epi_wf = registrationWorkflow.epiWorkflow()
     lb_wf = registrationWorkflow.labelWorkflow()
     seed_wf = registrationWorkflow.seedWorkflow()
-    fourier = afninodes.fouriernode(outputType, 'fourier') # Fourier is the last NIFTI file format in the AFNI pipeline
+    bandpass = afninodes.fouriernode(outputType, 'fourier') # Fourier is the last NIFTI file format in the AFNI pipeline
 
-    master.connect([(detrend, fourier,       [('out_file', 'in_file')]), # Per Dawei, bandpass after running 3dDetrend
+    master.connect([(detrend, bandpass,       [('out_file', 'in_file')]), # Per Dawei, bandpass after running 3dDetrend
                      (grabber, t1_wf,         [('t1_File', 'warpT1toFMRI.input_image')]),
                      (registration, t1_wf,    [('outputs.fmri_reference', 'warpT1toFMRI.reference_image'),  # T1
                                                ('outputs.t12fmri_list', 'warpT1toFMRI.transforms')]),
@@ -184,7 +182,7 @@ def pipeline(args):
                      # HACK: No EPI
                      # (downsampleAtlas, epi_wf, [('outputVolume', 'warpEPItoNAC.reference_image')]),
                      # (registration, epi_wf,    [('outputs.fmri2nac_list', 'warpEPItoNAC.transforms')]),
-                     # (fourier, epi_wf,         [('out_file', 'warpEPItoNAC.input_image')]),
+                     # (bandpass, epi_wf,         [('out_file', 'warpEPItoNAC.input_image')]),
                      # END HACK
                      (downsampleAtlas, lb_wf, [('outputVolume', 'warpLabeltoNAC.reference_image')]),
                      (registration, lb_wf,    [('outputs.fmri2nac_list', 'warpLabeltoNAC.transforms')]),
@@ -228,15 +226,15 @@ def pipeline(args):
     fmri_label_DataSink = dataio.fmriSink(master.base_dir, **args)
     master.connect(sessions, 'session_id', fmri_label_DataSink, 'container')
     master.connect(renameMasks2, 'out_file', fmri_label_DataSink, 'masks')
-    master.connect(fourier,'out_file', fmri_label_DataSink, 'masks.@bandpass')
+    master.connect(bandpass,'out_file', fmri_label_DataSink, 'masks.@bandpass')
 
     roiMedian = afninodes.maskavenode('AFNI_1D', 'afni_roiMedian', '-mrange 1 1')
     master.connect(renameMasks2, 'out_file', roiMedian, 'mask')
-    master.connect(fourier, 'out_file', roiMedian, 'in_file')
+    master.connect(bandpass, 'out_file', roiMedian, 'in_file')
 
     correlate = afninodes.fimnode('Correlation', 'afni_correlate')
     master.connect(roiMedian, 'out_file', correlate, 'ideal_file')
-    master.connect(fourier, 'out_file', correlate, 'in_file')
+    master.connect(bandpass, 'out_file', correlate, 'in_file')
 
     regionLogCalc = afninodes.logcalcnode(outputType, 'afni_regionLogCalc')
     master.connect(correlate, 'out_file', regionLogCalc, 'in_file_a')
@@ -266,9 +264,8 @@ def pipeline(args):
                      (seedSubflow, renameZscore2,      [('selectLabel.out', 'label')]),
                      (seedSubflow, seed_wf,               [('afni3Dcalc_seeds.out_file', 'warpSeedtoFMRI.input_image')])
                     ])
-    imageDir = '/tmp/images'  #os.path.join(master.base_dir, master.name, 'images')
+    imageDir = makeSupportDir(args['name'], "images")
     if args['plot']:
-        os.makedirs(imageDir)
         registration.write_graph(dotfilename=os.path.join(imageDir, 'register.dot'), graph2use='orig', format='png',
                                  simple_form=False)
         if preprocessOn:
@@ -279,10 +276,6 @@ def pipeline(args):
         seedSubflow.write_graph(dotfilename=os.path.join(imageDir, 'seedWorkflow.dot'), graph2use='orig', format='png',
                                  simple_form=False)
     elif args['debug']:
-        try:
-            os.makedirs(imageDir)
-        except:
-            pass
         master.write_hierarchical_dotfile(dotfilename=os.path.join(imageDir, 'debug_hier.dot'))
         master.write_graph(dotfilename=os.path.join(imageDir, 'debug_orig.dot'), graph2use="orig",  #='hierarchical',
                             format='png', simple_form=False)
@@ -292,7 +285,7 @@ def pipeline(args):
         # --------
         # import multiprocessing
         total_CPUS = 10  # multiprocessing.cpu_count()
-        master.run(plugin='MultiProc', plugin_args={'n_proc': total_CPUS}, updatehash=True)
+        master.run(plugin='MultiProc', plugin_args={'n_proc': total_CPUS})  #, updatehash=True)
         # --------
         # Run restingState on the local cluster
         # master.run(plugin='SGE', plugin_args={'template': os.path.join(os.getcwd(), 'ENV/bin/activate'),
