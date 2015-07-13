@@ -2,8 +2,7 @@ import nipype.pipeline.engine as pipe
 from nipype.interfaces.utility import Merge, IdentityInterface
 from nipype.interfaces.ants import ApplyTransforms
 # from nipype.interfaces.ants.registration import Registration
-
-import SEMTools as sem
+import nipype.interfaces.semtools as sem
 
 import dataio
 import afninodes
