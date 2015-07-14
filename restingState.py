@@ -23,9 +23,10 @@ Options:
 Note: Logs are written to the /tmp directory
 
 Example:
-  restingState.py -n my_new_experiment 0001 0002 0003
-  restingState.py -fgF nifti_gz --name new_experiment_w_gray_mask 00001 00002 00003
-  restingState.py -bn my_new_experiment_brain_mask --format afni 0001 0002 0003
+  restingState.py --seed seeds.fcsv --name 20150714_test 17650
+  restingState.py -w --seed seeds.fcsv --name 20150714_test 17650
+  restingState.py -dpgw -s test.fcsv -n 20150714_preprocessMaskGWMatters 13153
+  restingState.py --plot -pb 2015_preprocessMaskBrain 13153
 
 """
 from nipype import config, logging
@@ -330,5 +331,6 @@ if __name__ == '__main__':
     # Docopt doesn't recognize 'optional or', e.g. "[-p [-g | -b]]"
     if args['maskgm'] or args['maskwb']:
         assert args['preprocess'], "-g and -b flags must accompany -p"
+    assert os.path.isfile(args['seeds']), "Seed file must be a valid file"
     outvalue = pipeline(args)
     sys.exit(outvalue)
