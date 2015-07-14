@@ -1,4 +1,5 @@
 *.py[co]
+*.nii*
 
 # Packages
 *.egg
@@ -27,12 +28,13 @@ pip-log.txt
 .mr.developer.cfg
 
 #Nipype
-*.dot*
+*.dot
+*.png
 crash-*
 
 #rs-fMRI
-rs_fmri_workflow/
 *.n*
-logs/
 *\#*
+*~
 *.csv
+environment_vars

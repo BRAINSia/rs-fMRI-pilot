@@ -2,17 +2,27 @@
 # emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
 # vi: set ft=python sts=4 ts=4 sw=4 et:
 
+
 def makeList(input):
     """
     Hack to avoid making a MapNode for a list of length == 1
     """
     return [input]
 
+
+def concatTransforms(transform1, transform2):
+    """
+    Hack to put two transforms into a list
+    """
+    return [transform1, transform2]
+
+
 def splitList(in_list):
     t1_out = in_list[0]
-    label1_out = in_lits[1]
-    label2_out = in_lits[2]
+    label1_out = in_list[1]
+    label2_out = in_list[2]
     return t1_out, label1_out, label2_out
+
 
 def readNrrdHeader(fileName):
     """
@@ -31,9 +41,13 @@ def readNrrdHeader(fileName):
         fID.close()
     raise IOError('Nrrd file %s has regex match for slice and volume numbers!' % fileName)
 
-def strCreate(slices, volumes, repTime):
-    """ Removed FROM_IMAGE string in favor of hard-coded alt+z2 in afni.preprocess.py """
-    return "%s %s %s" % (slices, volumes, repTime)
+
+def strCreate(time, slices, volumes, repTime, order):
+    """
+    Create a funcparams string for To3D()
+    """
+    return "%s %s %s %s %s" % (time, slices, volumes, repTime, order.strip())
+
 
 def dicomRead(infolder):
     """
@@ -49,7 +63,8 @@ def dicomRead(infolder):
     raise Exception('None of the dicom files in %s contain \
                     "Repetition Time" where PyDicom can find it!' % infolder)
 
-def generateTissueMask(input_file, low=0.0, high=1.0, erodeFlag=True):
+
+def generateTissueMask(input_file, fileName, low=0.0, high=1.0, erode=False, binary=False, largest=False):
     """
     Using posterior tissue probability file, threshold by
     a low and/or high value, erode by 2mm, and take the ceil()
@@ -59,29 +74,41 @@ def generateTissueMask(input_file, low=0.0, high=1.0, erodeFlag=True):
     import SimpleITK as sitk
     assert (isinstance(input_file[0], str)), input_file
     image = sitk.ReadImage(input_file)
-    ## Compute brain mask
+    out_file = os.path.abspath('final_' + fileName)
+    # Compute brain mask
     inValue = 1
     outValue = 0
-    binaryMask = sitk.BinaryThreshold(image, low, high)
-    if erodeFlag:
-        fileName = 'whiteMatterMask.nii'
-        radiusMM = 1
-        erodedMask = sitk.BinaryErode(binaryMask, radiusMM)
-        sitk.WriteImage(erodedMask, os.path.abspath('eroded_' + fileName))
-        connected = sitk.ConnectedComponent(erodedMask)
-        sortedComp = sitk.RelabelComponent(connected, 10) # HACK
-        maskOnly = sitk.BinaryThreshold(sortedComp, 1, 1)
+    if binary:  # CSF label
+        # csfLabels = [4,23]
+        image1 = sitk.BinaryThreshold(image, low, low + 1)
+        image2 = sitk.BinaryThreshold(image, high, high + 1)
+        final_image = image1 + image2
+        sitk.WriteImage(final_image, out_file)
     else:
-        fileName = 'csfMask.nii'
-        connected = sitk.ConnectedComponent(binaryMask)
-        sortedComp = sitk.RelabelComponent(connected)
-        #        maskOnly = sitk.BinaryThreshold(sortedComp, 0.0, 1.0, inValue, outValue)
-        maskOnly = sitk.BinaryThreshold(sortedComp, 2.0, 2.0)
-    sitk.WriteImage(binaryMask, os.path.abspath('binary_' + fileName))
-    sitk.WriteImage(connected, os.path.abspath('connected_' + fileName))
-    sitk.WriteImage(sortedComp, os.path.abspath('sorted_' + fileName))
-    sitk.WriteImage(maskOnly, os.path.abspath('final_' + fileName))
-    return os.path.abspath('final_' + fileName)
+        binaryMask = sitk.BinaryThreshold(image, low, high)
+        if erode:  # White matter
+            radiusMM = 1
+            erodedMask = sitk.BinaryErode(binaryMask, radiusMM)
+            sitk.WriteImage(erodedMask, os.path.abspath('eroded_' + fileName))
+            connected = sitk.ConnectedComponent(erodedMask)
+            sortedComp = sitk.RelabelComponent(connected, 10)  # HACK
+            maskOnly = sitk.BinaryThreshold(sortedComp, 1, 2)  # JV made 1, 2
+            sitk.WriteImage(binaryMask, os.path.abspath('binary_' + fileName))
+            sitk.WriteImage(connected, os.path.abspath('connected_' + fileName))
+            sitk.WriteImage(sortedComp, os.path.abspath('sorted_' + fileName))
+            sitk.WriteImage(maskOnly, out_file)
+        elif largest:
+            sitk.WriteImage(binaryMask, os.path.abspath('binary_' + fileName))
+            connected = sitk.ConnectedComponent(binaryMask)
+            sitk.WriteImage(connected, os.path.abspath('connected_' + fileName))
+            sortedComp = sitk.RelabelComponent(connected, 300)
+            sitk.WriteImage(sortedComp, os.path.abspath('sorted_' + fileName))
+            maskOnly = sitk.BinaryThreshold(sortedComp, 1, 2)
+            sitk.WriteImage(maskOnly, out_file)
+        else:  # Gray matter
+            sitk.WriteImage(binaryMask, out_file)
+    return out_file
+
 
 def getLabelList(label_file, arg_template):
     import os
@@ -97,6 +124,7 @@ def getLabelList(label_file, arg_template):
         if labelCode > 0:
             arg_str.append(arg_template.format(labelCode))
     return arg_str, labelList
+
 
 def writeMat(in_file):
     """
@@ -135,15 +163,16 @@ def writeMat(in_file):
         #rows = len(timepoint)
         data = np.array(row_data, dtype='float', ndmin=2)
         labels = np.array(regionsLabel, dtype='int', ndmin=1)
-    corr = np.corrcoef(data, rowvar=0) # Set rowvar > 0 to correlate timepoints, rowvar = 0 for regions
+    corr = np.corrcoef(data, rowvar=0)  # Set rowvar > 0 to correlate timepoints, rowvar = 0 for regions
     temp, _ = os.path.basename(in_file).split('.')
     corrFile = os.path.abspath(temp + '_corr.mat')
     labelFile = os.path.abspath(temp + '_labels.mat')
     rawFile = os.path.abspath(temp + '_raw.mat')
-    savemat(file_name=corrFile, mdict={'data':corr}, appendmat=True, oned_as='row')
-    savemat(file_name=labelFile, mdict={'data':labels}, appendmat=True, oned_as='row')
-    savemat(file_name=rawFile, mdict={'data':data}, appendmat=True, oned_as='row')
+    savemat(file_name=corrFile, mdict={'data': corr}, appendmat=True, oned_as='row')
+    savemat(file_name=labelFile, mdict={'data': labels}, appendmat=True, oned_as='row')
+    savemat(file_name=rawFile, mdict={'data': data}, appendmat=True, oned_as='row')
     return corrFile, labelFile, rawFile
+
 
 def generateMatSubstitution(in_file, session):
     import os.path
@@ -151,3 +180,107 @@ def generateMatSubstitution(in_file, session):
     replaceString = "{session}_{suffix}".format(session=session,
                                                 suffix=oldString.split('roiStat_')[1])
     return [(oldString, replaceString)]
+
+
+def getSubject(fstring, depth=-4):
+    """ get the subject id from a path by returning element depth from split list """
+    import os.path
+    tree = fstring.split(os.path.sep)
+    return tree[depth]
+
+
+def formatFMRI(dicomDirectory):
+    """
+
+    :param dicomDirectory:
+    """
+    import os.path
+    import subprocess
+    from utilities import __file__
+
+    cmd = [os.path.join(os.path.dirname(__file__), 'scripts', 'formatFMRI.sh'), dicomDirectory]
+    outputs = subprocess.check_output(cmd, stderr=subprocess.STDOUT).split(" ")
+    # outputs = cmd.stdout.read().split(" ")
+    # errors = cmd.stderr.read().split(" ")
+    sliceOrder = outputs.pop()
+    repetitionTime = outputs.pop()
+    numberOfFiles = outputs.pop()
+    numberOfSlices = outputs.pop()
+    modality = outputs.pop()
+
+    return modality, numberOfSlices, numberOfFiles, repetitionTime, sliceOrder
+
+
+def resampleImage(inputVolume, outputVolume, resolution=(1.0, 1.0, 1.0)):
+    """
+    Resample the image using Linear interpolation (and identity transform) to the given resolution and write out the file
+
+    """
+    import os
+
+    import SimpleITK as sitk
+
+    image = sitk.ReadImage(inputVolume)
+    old_size = list(image.GetSize())
+    old_res = list(image.GetSpacing())
+    new_res = list(resolution)
+    new_size = [int((old_size[i] * old_res[i]) / new_res[i]) for i in range(len(new_res))]
+
+    resampler = sitk.ResampleImageFilter()
+    resampler.SetSize(tuple(new_size))
+    resampler.SetTransform(sitk.Transform(3, sitk.sitkIdentity))
+    resampler.SetInterpolator(sitk.sitkLinear)
+    resampler.SetOutputOrigin(image.GetOrigin())
+    resampler.SetOutputSpacing(tuple(new_res))
+    resampler.SetOutputDirection(image.GetDirection())
+    outImage = resampler.Execute(image)
+
+    felements = outputVolume.split('.')
+    if len(felements) == 1:
+        outputVolume += '.nii.gz'
+    outputVolume = os.path.join(os.getcwd(), outputVolume)
+    sitk.WriteImage(outImage, outputVolume)
+    return outputVolume
+
+
+def clipSeedWithVentricles(seed, label, outfile):
+    """
+    This function takes in a seed image, and a BRAINSABC tissue segmentation image,
+    threasholds the CSF component (ie. label=4) and then clips the seed mask
+    """
+    import SimpleITK as sitk
+    import os
+    from utilities import clipSeed
+    csfLabel = 4
+    return clipSeed(seed, label, csfLabel, outfile, invert=True)
+
+
+def clipSeedWithWhiteMatter(seed, mask, outfile):
+    """
+    This function takes in a seed image and a whiteMatter mask to clip the seed
+    """
+    import SimpleITK as sitk
+    import os
+    from utilities import clipSeed
+    wmLabel = 1
+    return clipSeed(seed, mask, wmLabel, outfile, invert=True)
+
+
+def clipSeed(seed, tissues, label, outfile, invert):
+    """
+    Given two filenames and a label, mask the first file by the second.  Return the filename
+      of the output.  Behavior of masking is controlled by the label and invert inputs
+    """
+    import SimpleITK as sitk
+    import os
+    seedImage = sitk.ReadImage(os.path.abspath(seed))
+    tissueImage = sitk.ReadImage(os.path.abspath(tissues))
+    binaryImage = sitk.BinaryThreshold(tissueImage, label, label)
+    if invert:
+        invertImage = sitk.Cast((1 - binaryImage), seedImage.GetPixelIDValue())
+        clippedImage = seedImage * invertImage
+    else:
+        clippedImage = seedImage * sitk.Cast(binaryImage, seedImage.GetPixelIDValue())
+    outfile = os.path.abspath(outfile)
+    sitk.WriteImage(clippedImage, outfile)
+    return outfile
