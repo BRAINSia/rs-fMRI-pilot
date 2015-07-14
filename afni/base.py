@@ -40,7 +40,7 @@ class Info(object):
         """
         clout = CommandLine(command='afni_vcheck').run()
         out = clout.runtime.stdout
-        return out.split('\n')[1]
+        return out.split('\n')[1].split('AFNI_')[1]
 
     @classmethod
     def outputtype_to_ext(cls, outputtype):
@@ -151,6 +151,9 @@ class AFNICommand(CommandLine):
     def set_default_suffix(cls, suffix):
         cls._suffix = suffix
 
+    def _gen_filename(self, *args):
+        raise NotImplementedError
+
     def _gen_fname(self, basename, cwd=None, suffix='_afni', prefix='', change_ext=True):
         """
         Generate a filename based on the given parameters.
@@ -195,4 +198,7 @@ class AFNICommand(CommandLine):
             # raise IOError("change_ext flag MUST be true; False not yet implemented!")
         fname = fname_presuffix(basename, suffix=suffix, prefix=prefix,
                                 use_ext=False, newpath=cwd)
+        if Info.version() == '2011_12_21_1014' and \
+          not (fname.endswith("BRIK") or fname.endswith("HEAD")):
+            fname = fname.replace('+', '_')
         return fname
