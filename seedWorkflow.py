@@ -106,9 +106,9 @@ def createSphereExpression(coordinates, radius=5):
     return expression
 
 
-def workflow(outputType, name):
+def workflow(filename, outputType, name):
     seedworkflow = pipe.Workflow(name=name)
-    labels, seeds = getAtlasPoints('seeds.fcsv')  # Create seed points
+    labels, seeds = getAtlasPoints(filename)  # Create seed points
 
     seedsIdentity = pipe.Node(interface=IdentityInterface(fields=['index']), name='seedsIdentity')
     seedsIdentity.iterables = ('index', range(len(labels)))
