@@ -2,24 +2,25 @@
 """
 Usage:
   restingState.py [-h | --help]
-  restingState.py [options] [-g | -b] (-n NAME | --name NAME) SESSION...
+  restingState.py [options] [-g | -b] (-n NAME | --name NAME) (-s SEEDS | --seeds SEEDS) SESSION...
 
 Arguments:
   -n NAME, --name NAME        experiment name, format: 'YYYYMMDD_<experiment>'
+  -s SEEDS, --seeds SEEDS     seed fiducial file in .fcsv format
   SESSION                     one or more session IDs
 
 Options:
   -h, --help                  show this help message and exit
+  -b, --maskWB                whole brain (requires -p)
   -d, --debug                 run in debug mode
-  -P, --plot                  write out the workflow graphs to cache directory's images/ and exit
   -f, --force                 force DataSink rewriting
-  -p, --preprocess            run preprocessing pipeline (not Cleveland)
-  -g, --maskGM                global signal regression by masking gray matter (cannot be combined with -b)
-  -b, --maskWB                whole brain (cannot be combined with -g)
-  -w, --maskSeeds             mask white matter from seeds
   -F FORMAT, --format FORMAT  output format, values: afni, nifti, nifti_gz [default: nifti]
+  -g, --maskGM                global signal regression by masking gray matter (requires -p)
+  -p, --preprocess            run preprocessing pipeline (not Cleveland)
+  -P, --plot                  write out the workflow graphs to /tmp and exit
+  -w, --maskSeeds             mask white matter from seeds
 
-Note: Logs are written to the $PWD/$USER/logs directory
+Note: Logs are written to the /tmp directory
 
 Example:
   restingState.py -n my_new_experiment 0001 0002 0003
@@ -52,7 +53,7 @@ def makeSupportDir(name, suffix):
     Create /tmp/name.suffix, if it d.n.e. This prevents permission collisions with different users
     running the same pipeline
     """
-    retval = os.path.join('tmp', name + '.' + suffix)
+    retval = os.path.abspath(os.path.join(os.path.sep, 'tmp', name + '.' + suffix))
     if not os.path.isdir(retval):
         os.makedirs(retval, 0777)
     return retval
@@ -140,8 +141,8 @@ def pipeline(args):
                              (preprocessing, nuisance, [('calc.out_file', 'gm.afni3DmaskAve_grm.in_file'),
                                                         ('volreg.oned_file', 'afni3Ddeconvolve.stim_file_4')])])
         elif maskWholeBrain:
-            master.connect([(registration, nuisance,  [('outputs.fmri_reference', 'wb.warpCSFtoFMRI.reference_image'),
-                                                        ('outputs.nac2fmri_list', 'wb.warpCSFtoFMRI.transforms')]),
+            master.connect([(registration, nuisance,  [('outputs.fmri_reference', 'wb.warpBraintoFMRI.reference_image'),
+                                                        ('outputs.nac2fmri_list', 'wb.warpBraintoFMRI.transforms')]),
                              (preprocessing, nuisance, [('calc.out_file', 'wb.afni3DmaskAve_whole.in_file'),
                                                         ('volreg.oned_file', 'afni3Ddeconvolve.stim_file_4')])])
         else:
@@ -255,7 +256,7 @@ def pipeline(args):
     master.connect(lb_wf, 'warpLabeltoNAC.output_image', renameZscore2, 'in_file')
     master.connect(renameZscore2, 'out_file', atlas_DataSink, 'Atlas.@zscore')
     # Connect seed subworkflow
-    seedSubflow = seedWorkflow.workflow(outputType='NIFTI_GZ', name='seed_wkfl')
+    seedSubflow = seedWorkflow.workflow(args['seeds'], outputType='NIFTI_GZ', name='seed_wkfl')
     master.connect([(downsampleAtlas, seedSubflow,    [('outputVolume', 'afni3Dcalc_seeds.in_file_a')]),
                      (seedSubflow, renameMasks,        [('afni3Dcalc_seeds.out_file', 'in_file'),
                                                         ('selectLabel.out', 'label')]),
@@ -318,5 +319,8 @@ if __name__ == '__main__':
                              "afni": "afni",
                              "nifti": "nii"}
     args['freesurfer'] = freesurferOutputTypes[args['format']]
+    # Docopt doesn't recognize 'optional or', e.g. "[-p [-g | -b]]"
+    if args['maskgm'] or args['maskwm']:
+        assert args['preprocess'], "-g and -b flags must accompany -p"
     outvalue = pipeline(args)
     sys.exit(outvalue)
