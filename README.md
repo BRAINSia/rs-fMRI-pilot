@@ -18,10 +18,15 @@ Code for resting-state fMRI pilot study
     vim pygraphviz-1.1/setup.py
 
 Edit pygraphviz/setup.py like so:
-#  ...
-#  library_path='/usr/local/Cellar/graphviz/2.38.0/lib'
-#  include_path='/usr/local/Cellar/graphviz/2.38.0/include'
-#  ...
+
+--
+    ...
+    library_path='/usr/local/Cellar/graphviz/2.38.0/lib'
+    include_path='/usr/local/Cellar/graphviz/2.38.0/include'
+    ...
+--
+
+Finally:
 
     cd pygraphviz-1.1/
     python setup.py install
