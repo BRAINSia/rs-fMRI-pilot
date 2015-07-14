@@ -81,8 +81,8 @@ def pipeline(args):
     resampleResolution = (2.0, 2.0, 2.0)
     downsampledfilename = 'downsampled_atlas.nii.gz'
     # if preprocessing and nuisance is needed
-    args['csf_input'] = atlasFile
-    args['wb_input'] = wholeBrainFile
+    # args['csf_input'] = atlasFile
+    # args['wb_input'] = wholeBrainFile
 
     master = pipe.Workflow(name=args['name'] + "_CACHE")
     master.base_dir = os.path.abspath("/Shared/sinapse/CACHE")
@@ -134,24 +134,28 @@ def pipeline(args):
                                                        ('outputs.fmri_reference', 'wm.warpWMtoFMRI.reference_image'),    # WM
                                                        ('outputs.t12fmri_list', 'wm.warpWMtoFMRI.transforms')]),
                         ])
+        warpCSFtoFMRInode = nuisance.get_node('csf').get_node('warpCSFtoFMRI')
+        warpCSFtoFMRInode.input_file = atlasFile
         if maskGM:
             master.connect([(grabber, nuisance,       [('gryFile', 'gm.warpGMtoFMRI.input_image')]),
-                             (registration, nuisance,  [('outputs.fmri_reference', 'gm.warpGMtoFMRI.reference_image'),
-                                                        ('outputs.t12fmri_list', 'gm.warpGMtoFMRI.transforms')]),
-                             (preprocessing, nuisance, [('calc.out_file', 'gm.afni3DmaskAve_grm.in_file'),
-                                                        ('volreg.oned_file', 'afni3Ddeconvolve.stim_file_4')])])
+                            (registration, nuisance,  [('outputs.fmri_reference', 'gm.warpGMtoFMRI.reference_image'),
+                                                       ('outputs.t12fmri_list', 'gm.warpGMtoFMRI.transforms')]),
+                            (preprocessing, nuisance, [('calc.out_file', 'gm.afni3DmaskAve_grm.in_file'),
+                                                       ('volreg.oned_file', 'afni3Ddeconvolve.stim_file_4')])])
         elif maskWholeBrain:
             master.connect([(registration, nuisance,  [('outputs.fmri_reference', 'wb.warpBraintoFMRI.reference_image'),
-                                                        ('outputs.nac2fmri_list', 'wb.warpBraintoFMRI.transforms')]),
-                             (preprocessing, nuisance, [('calc.out_file', 'wb.afni3DmaskAve_whole.in_file'),
-                                                        ('volreg.oned_file', 'afni3Ddeconvolve.stim_file_4')])])
+                                                       ('outputs.nac2fmri_list', 'wb.warpBraintoFMRI.transforms')]),
+                            (preprocessing, nuisance, [('calc.out_file', 'wb.afni3DmaskAve_whole.in_file'),
+                                                       ('volreg.oned_file', 'afni3Ddeconvolve.stim_file_4')])])
+            warpBraintoFMRInode = nuisance.get_node('wb').get_node('warpBraintoFMRI')
+            warpBraintoFMRInode.input_mask = wholeBrainFile
         else:
             master.connect([(preprocessing, nuisance, [('volreg.oned_file', 'afni3Ddeconvolve.stim_file_3')])])
 
         master.connect([(preprocessing, nuisance, [('calc.out_file', 'wm.afni3DmaskAve_wm.in_file'),
-                                                    ('calc.out_file', 'csf.afni3DmaskAve_csf.in_file'),
-                                                    ('calc.out_file', 'afni3Ddeconvolve.in_file')]),
-                         (nuisance, detrend,       [('afni3Ddeconvolve.out_errts', 'in_file')])])  # 13
+                                                   ('calc.out_file', 'csf.afni3DmaskAve_csf.in_file'),
+                                                   ('calc.out_file', 'afni3Ddeconvolve.in_file')]),
+                        (nuisance, detrend,       [('afni3Ddeconvolve.out_errts', 'in_file')])])  # 13
     else:
         cleveland_grabber = dataio.clevelandGrabber()
         grabber = dataio.autoworkupGrabber(t1_experiment, site, subject)
@@ -274,23 +278,27 @@ def pipeline(args):
                                       simple_form=False)
             nuisance.write_graph(dotfilename=os.path.join(imageDir, 'nuisance.dot'), graph2use='orig', format='png',
                                  simple_form=False)
-        seedSubflow.write_graph(dotfilename=os.path.join(imageDir, 'seedWorkflow.dot'), graph2use='orig', format='png',
+        seedSubflow.write_graph(dotfilename=os.path.join(imageDir, 'seed.dot'), graph2use='orig', format='png',
                                  simple_form=False)
+        master.write_graph(dotfilename=os.path.join(imageDir, 'master.dot'), graph2use="orig", format='png', simple_form=False)
     elif args['debug']:
-        master.write_hierarchical_dotfile(dotfilename=os.path.join(imageDir, 'debug_hier.dot'))
-        master.write_graph(dotfilename=os.path.join(imageDir, 'debug_orig.dot'), graph2use="orig",  #='hierarchical',
-                            format='png', simple_form=False)
-        # master.run()  #updatehash=True)
-        # Run restingState on the all threads
-        # Setup environment for CPU load balancing of ITK based programs.
-        # --------
-        # import multiprocessing
-        total_CPUS = 10  # multiprocessing.cpu_count()
-        master.run(plugin='MultiProc', plugin_args={'n_proc': total_CPUS})  #, updatehash=True)
-        # --------
-        # Run restingState on the local cluster
-        # master.run(plugin='SGE', plugin_args={'template': os.path.join(os.getcwd(), 'ENV/bin/activate'),
-        #                                        'qsub_args': '-S /bin/bash -cwd'})  #, updatehash=True)
+        try:
+            master.run()  #updatehash=True)
+            # Run restingState on the all threads
+            # Setup environment for CPU load balancing of ITK based programs.
+            # --------
+            # import multiprocessing
+            # total_CPUS = 10  # multiprocessing.cpu_count()
+            # master.run(plugin='MultiProc', plugin_args={'n_proc': total_CPUS})  #, updatehash=True)
+            # --------
+            # Run restingState on the local cluster
+            # master.run(plugin='SGE', plugin_args={'template': os.path.join(os.getcwd(), 'ENV/bin/activate'),
+            #                                        'qsub_args': '-S /bin/bash -cwd'})  #, updatehash=True)
+        except:
+            pass
+        master.name = "master"  # HACK: Bug in Graphviz for nodes beginning with numbers
+        master.write_graph(dotfilename=os.path.join(imageDir, 'debug_hier.dot'), graph2use="colored", format='png')
+        master.write_graph(dotfilename=os.path.join(imageDir, 'debug_orig.dot'), graph2use="flat", format='png')
     else:
         #HACK commented out for now
         #master.write_graph(dotfilename='images/' + args['name'] + '.dot')
@@ -320,7 +328,7 @@ if __name__ == '__main__':
                              "nifti": "nii"}
     args['freesurfer'] = freesurferOutputTypes[args['format']]
     # Docopt doesn't recognize 'optional or', e.g. "[-p [-g | -b]]"
-    if args['maskgm'] or args['maskwm']:
+    if args['maskgm'] or args['maskwb']:
         assert args['preprocess'], "-g and -b flags must accompany -p"
     outvalue = pipeline(args)
     sys.exit(outvalue)
