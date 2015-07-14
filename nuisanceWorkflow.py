@@ -24,10 +24,10 @@ def maskNode(name, **inputkwargs):
     return node
 
 
-def csfWorkflow():  #input_file):
+def csfWorkflow():
     # Nodes
     warp = applyTransformNode(name='warpCSFtoFMRI', transform='nac2fmri')
-    mask = maskNode(name='csfMask', fileName='csfMask.nii', low=3, high=42, flags=['binary'])  #, input_file=input_file)
+    mask = maskNode(name='csfMask', fileName='csfMask.nii', low=3, high=42, flags=['binary'])
     avg = afninodes.maskavenode('AFNI_1D', 'afni3DmaskAve_csf')
     # Pipeline
     csf = pipe.Workflow(name='csf')
@@ -78,13 +78,9 @@ def wbWorkflow():
 
 def workflow(outputType, name="nuisance", **kwargs):
     # Nodes
-    # in_fields = ["oned_file", "nactoFMRI", "t1toFMRI", "avg_file"]
-    # inputnode = pipe.Node(interface=IdentityInterface(fields=in_fields), name="inputs")
-    csf_sub = csfWorkflow()  #kwargs['csf_input'])
+    csf_sub = csfWorkflow()
     wm_sub = wmWorkflow()
-
     nuisance = pipe.Workflow(name=name)
-    # nuisance.connect([(inputnode, csf_sub, [('avg_file', 'afni3DmaskAve_csf.in_file')
 
     if kwargs['maskgm']:
         gm_sub = gmWorkflow()  # Mask gray matter
