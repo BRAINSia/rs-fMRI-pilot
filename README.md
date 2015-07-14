@@ -37,11 +37,14 @@ Finally:
 ## Usage
 
 To load environment:
+
     $ source /Shared/sinapse/progopt/setup_virtualenv
     $ workon rs-fMRI-pilot
 
 To debug crash files:
+
     $ nipype_display_crash <CRASHFILE>
 
 To unload environment:
+
     $ deactivate
