@@ -3,10 +3,11 @@ import os.path
 import nipype.pipeline.engine as pipe
 from nipype.interfaces.io import DataSink, DataGrabber
 
-
+# Templates
 autoworkup = 'Experiments/{experiment}/{site}/{subject}/%s/{result}/{fname}.nii.gz'
 raw_dicom = 'MRx/{site}/{subject}/%s/%s/%s/*'
-cleveland = 'Experiments/20150409_ClevelandPreProcessedfMRI/%s/*.hdr'
+cleveland = '20150409_ClevelandPreProcessedfMRI/%s/*.hdr'
+transform = '{experiment}/SubjectToAtlasWarped/%s/%s.h5'
 
 
 def datagrabber(infields, template, field_template, template_args, base_directory, name):
@@ -55,7 +56,7 @@ def iowaGrabber(experiment, site, subject, maskGM=False, maskWholeBrain=False, *
 
 def autoworkupGrabber(experiment, site, subject, **kwargs):
     kwargs.setdefault("name", "t1Grabber")
-    kwargs.setdefault("base_directory", "/Shared/paulsen")
+    kwargs.setdefault("base_directory", "/Shared/paulsen")  #Largest common path for both raw_dicom and autoworkup templates
     kwargs.setdefault("template", "*")
     kwargs.setdefault("infields", ['session_id'])
     ftemplate = autoworkup.format(experiment=experiment, site=site, subject=subject, result="TissueClassify", fname="%s")
@@ -73,8 +74,7 @@ def autoworkupGrabber(experiment, site, subject, **kwargs):
 
 def clevelandGrabber(**kwargs):
     kwargs.setdefault("name", "clevelandGrabber")
-    kwargs.setdefault("base_directory", "/Shared/paulsen")
-    # TODO: Jatin will symlink these tonight
+    kwargs.setdefault("base_directory", "/Shared/paulsen/Experiments")
     kwargs.setdefault("infields", ['session_id'])
     kwargs.setdefault("template", "*")
     kwargs.setdefault("field_template", dict(fmriHdr=cleveland))
@@ -87,13 +87,13 @@ def transformGrabber(experiment):
                                               outfields=["atlasToSessionTransform", "sessionToAtlasTransform"]),
                         name="transformGrabber")
     grabber.inputs.sort_filelist = False
-    grabber.inputs.base_directory = "/Shared/paulsen/Experiments/{experiment}/SubjectToAtlasWarped".format(experiment=experiment)
+    grabber.inputs.base_directory = "/Shared/paulsen/Experiments"
     grabber.inputs.template = "*"
-    transformRegex = "%s/AtlasToSubject%sComposite.h5"
+    transformRegex = transform.format(experiment=experiment)
     grabber.inputs.field_template = dict(atlasToSessionTransform=transformRegex,
                                          sessionToAtlasTransform=transformRegex)
-    grabber.inputs.template_args = dict(atlasToSessionTransform=[["session_id", "PostBABC_SyN"]],
-                                        sessionToAtlasTransform=[["session_id", "PostBABC_SyNInverse"]])
+    grabber.inputs.template_args = dict(atlasToSessionTransform=[["session_id", "AtlasToSubjectPostBABC_SyNComposite"]],
+                                        sessionToAtlasTransform=[["session_id", "AtlasToSubjectPostBABC_SyNInverseComposite"]])
     return grabber
 
 

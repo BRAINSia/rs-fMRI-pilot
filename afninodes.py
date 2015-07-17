@@ -145,7 +145,8 @@ def deconvolvenode(labels, name):
     """
     Use 3dDeconvolve() to compute the linear regression of the data with varying stimulus inputs determined by the
     labels provided at runtime.  Output needed for 3dDetrend()
-     """
+
+    """
     defaults = ("roll", "pitch", "yaw", "dS", "dL", "dP")
     labels = tuple(labels)
     all_labels = labels + defaults
@@ -162,12 +163,12 @@ def deconvolvenode(labels, name):
     node.inputs.fitts = 'full_fitts_Decon'
     node.inputs.errts = 'errts_Decon'
     # tuple is zero-based indexed, while Deconvolve uses one-based indexing, so we use enumerate with start=1
-    for index, value in enumerate(labels, start=1):
+    for index, value in enumerate(all_labels, start=1):
         stim_key = "stim_label_{0}".format(index)
-        setattr(node.inputs, stim_key, value)
+        setattr(node.inputs, stim_key, str(value))
 
         base_key = "is_stim_base_{0}".format(index)
-        if index <= (len(labels) + 1):
+        if index <= (len(labels)):
             setattr(node.inputs, base_key, False)
         else:
             setattr(node.inputs, base_key, True)
@@ -208,3 +209,7 @@ def logcalcnode(outputType, name):
     node.inputs.outputtype = outputType
     node.inputs.expr = 'log((1+a)/(1-a))/2'
     return node
+
+if __name__ == "__main__":
+    import doctest
+    doctest.testfile('tests/doctest_afninodes.txt', raise_on_error=True)
