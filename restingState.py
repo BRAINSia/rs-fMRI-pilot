@@ -76,14 +76,11 @@ def pipeline(args):
     maskWhiteMatterFromSeeds = args['maskseeds']
     # print args['name']
     t1_experiment = "20141001_PREDICTHD_long_Results"  #"20130729_PREDICT_Results"
-    atlasFile = "/Shared/paulsen/Experiments/rsFMRI/rs-fMRI-pilot/ReferenceAtlas/template_t1.nii.gz"
-    wholeBrainFile = "/Shared/paulsen/Experiments/rsFMRI/rs-fMRI-pilot/ReferenceAtlas/template_brain.nii.gz"
-    atlasLabel = "/Shared/paulsen/Experiments/rsFMRI/rs-fMRI-pilot/ReferenceAtlas/template_nac_labels.nii.gz"
+    atlasFile = os.path.abspath(os.path.join(os.path.dirname(__file__), "ReferenceAtlas", "template_t1.nii.gz"))
+    wholeBrainFile = os.path.abspath(os.path.join(os.path.dirname(__file__), "ReferenceAtlas", "template_brain.nii.gz"))
+    atlasLabel = os.path.abspath(os.path.join(os.path.dirname(__file__), "ReferenceAtlas", "template_nac_labels.nii.gz"))
     resampleResolution = (2.0, 2.0, 2.0)
     downsampledfilename = 'downsampled_atlas.nii.gz'
-    # if preprocessing and nuisance is needed
-    # args['csf_input'] = atlasFile
-    # args['wb_input'] = wholeBrainFile
 
     master = pipe.Workflow(name=args['name'] + "_CACHE")
     master.base_dir = os.path.abspath("/Shared/sinapse/CACHE")
@@ -136,7 +133,7 @@ def pipeline(args):
                                                        ('outputs.t12fmri_list', 'wm.warpWMtoFMRI.transforms')]),
                         ])
         warpCSFtoFMRInode = nuisance.get_node('csf').get_node('warpCSFtoFMRI')
-        warpCSFtoFMRInode.input_file = atlasFile
+        warpCSFtoFMRInode.inputs.input_image = atlasFile
         if maskGM:
             master.connect([(grabber, nuisance,       [('gryFile', 'gm.warpGMtoFMRI.input_image')]),
                             (registration, nuisance,  [('outputs.fmri_reference', 'gm.warpGMtoFMRI.reference_image'),
@@ -149,7 +146,7 @@ def pipeline(args):
                             (preprocessing, nuisance, [('calc.out_file', 'wb.afni3DmaskAve_whole.in_file'),
                                                        ('volreg.oned_file', 'afni3Ddeconvolve.stim_file_4')])])
             warpBraintoFMRInode = nuisance.get_node('wb').get_node('warpBraintoFMRI')
-            warpBraintoFMRInode.input_mask = wholeBrainFile
+            warpBraintoFMRInode.inputs.input_image= wholeBrainFile
         else:
             master.connect([(preprocessing, nuisance, [('volreg.oned_file', 'afni3Ddeconvolve.stim_file_3')])])
 
@@ -250,6 +247,7 @@ def pipeline(args):
     master.connect(sessions, 'session_id', renameZscore, 'session')
     master.connect(regionLogCalc, 'out_file', renameZscore, 'in_file')
     master.connect(renameZscore, 'out_file', fmri_label_DataSink, 'zscores')
+    master.connect(t1_wf, 'warpT1toFMRI.output_image', fmri_label_DataSink, 'zscores.@t1Underlay')
 
     # Move z values back into NAC atlas space
     # master.connect(downsampleAtlas, 'outputVolume', lb_wf, 'warpLabeltoNAC.reference_image')
@@ -284,7 +282,7 @@ def pipeline(args):
         master.write_graph(dotfilename=os.path.join(imageDir, 'master.dot'), graph2use="orig", format='png', simple_form=False)
     elif args['debug']:
         try:
-            master.run()  #updatehash=True)
+            master.run(updatehash=True)
             # Run restingState on the all threads
             # Setup environment for CPU load balancing of ITK based programs.
             # --------
@@ -301,10 +299,7 @@ def pipeline(args):
         master.write_graph(dotfilename=os.path.join(imageDir, 'debug_hier.dot'), graph2use="colored", format='png')
         master.write_graph(dotfilename=os.path.join(imageDir, 'debug_orig.dot'), graph2use="flat", format='png')
     else:
-        #HACK commented out for now
-        #master.write_graph(dotfilename='images/' + args['name'] + '.dot')
         import multiprocessing
-        # Setup environment for CPU load balancing of ITK based programs.
         total_CPUS = multiprocessing.cpu_count()
         master.run(plugin='MultiProc', plugin_args={'n_proc': total_CPUS})  #, updatehash=True)
     return 0
